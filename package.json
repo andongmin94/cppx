@@ -1,0 +1,45 @@
+{
+  "name": "cppx",
+  "version": "0.1.0",
+  "description": "Cargo-like C++ workflow on Windows with Electron UI",
+  "main": "./out/main/index.js",
+  "author": "cppx",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "set ELECTRON_RUN_AS_NODE=&& electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "set ELECTRON_RUN_AS_NODE=&& electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "cppx": "tsx src/main/cli.ts"
+  },
+  "dependencies": {
+    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.2.5",
+    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-slot": "^1.2.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "commander": "^14.0.1",
+    "lucide-react": "^0.545.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.4.0",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "autoprefixer": "^10.4.21",
+    "electron": "^37.3.1",
+    "electron-vite": "^4.0.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  }
+}
