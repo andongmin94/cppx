@@ -1,4 +1,12 @@
-﻿# cppx
+﻿<div align="center">
+
+<a href="https://cppx.andongmin.com">
+<img src="https://cppx.andongmin.com/logo.svg" alt="logo" height="200" />
+</a>
+
+</div>
+
+# cppx
 
 Windows에서 C++ 개발을 **Cargo처럼** 다룰 수 있게 해 주는 Electron 앱 + CLI입니다.
 
