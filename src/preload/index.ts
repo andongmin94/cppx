@@ -9,6 +9,8 @@ const api: CppxApi = {
     ipcRenderer.invoke(IPC_CHANNELS.RUN_COMMAND, payload),
   selectWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.SELECT_WORKSPACE),
   getDefaultWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.GET_DEFAULT_WORKSPACE),
+  getCppxRoot: () => ipcRenderer.invoke(IPC_CHANNELS.GET_CPPX_ROOT),
+  getCompilerScan: () => ipcRenderer.invoke(IPC_CHANNELS.GET_COMPILER_SCAN),
   getToolStatus: () => ipcRenderer.invoke(IPC_CHANNELS.GET_TOOL_STATUS),
   getProjectConfig: (workspace: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.GET_PROJECT_CONFIG, workspace),

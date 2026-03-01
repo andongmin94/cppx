@@ -34,7 +34,7 @@ program
 program
   .command("install-tools")
   .description(
-    "Install CMake, Ninja, vcpkg, clangd, and local C++ compiler under %LOCALAPPDATA%/cppx"
+    "Install CMake, Ninja, vcpkg, and local C++ compiler under %LOCALAPPDATA%/cppx"
   )
   .action(async () => {
     await execute({
@@ -123,7 +123,6 @@ program
       ["cmake", status.cmake],
       ["ninja", status.ninja],
       ["vcpkg", status.vcpkg],
-      ["clangd", status.clangd],
       ["cxx", status.cxx]
     ];
 

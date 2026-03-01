@@ -40,19 +40,30 @@ export class CppxService {
         ? path.resolve(payload.workspace)
         : process.cwd();
     const preset = payload.preset?.trim() || "debug-x64";
+    let resolvedWorkspace = workspace;
 
     try {
       this.logger.info(action, `'${action}' 시작`);
 
       switch (action) {
         case "install-tools": {
-          await installAllTools(this.logger);
+          await installAllTools(
+            this.logger,
+            payload.compilerPreference,
+            payload.msvcInstallationPath
+          );
           break;
         }
         case "init": {
           const toolchain = await resolveToolchainOrThrow(this.logger);
-          await initProject(workspace, payload.projectName, toolchain, this.logger);
-          await cleanupLegacyWorkspaceFiles(workspace, this.logger);
+          const initializedWorkspace = await initProject(
+            workspace,
+            payload.projectName,
+            toolchain,
+            this.logger
+          );
+          resolvedWorkspace = initializedWorkspace;
+          await cleanupLegacyWorkspaceFiles(initializedWorkspace, this.logger);
           break;
         }
         case "add": {
@@ -94,7 +105,8 @@ export class CppxService {
         action,
         ok: true,
         code: 0,
-        message: `${action} 완료`
+        message: `${action} 완료`,
+        workspace: resolvedWorkspace
       };
     } catch (error) {
       const message = (() => {

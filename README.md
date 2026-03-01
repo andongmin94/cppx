@@ -6,11 +6,11 @@ Windows에서 C++ 개발을 Cargo처럼 다룰 수 있게 해주는 Electron 앱
 
 - React + shadcn/ui 기반 Electron GUI
 - 외부 명령 실행 오케스트레이션(`child_process.spawn`)
-- 도구 설치 흐름(`cmake`, `ninja`, `vcpkg`, `clangd`, 로컬 `clang++` 툴체인)
+- 도구 설치 흐름(`cmake`, `ninja`, `vcpkg`, 로컬 `clang++` 툴체인)
 - 프로젝트 작업 흐름: `init`, `add`, `build`, `run`, `test`, `pack`
 - 단일 관리 루트: `%LOCALAPPDATA%/cppx`
 - 단일 설정 원본: `.cppx/config.toml`
-- 생성 파일은 `.cppx/generated` 아래에서 관리:
+- 생성 파일은 `.cppx` 아래에서 관리:
   - `CMakeLists.txt`
   - `CMakePresets.json`
   - `vcpkg.json`
@@ -130,7 +130,7 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기`/`config 저장`으
 1. `cmake --preset debug-x64`
 2. `cmake --build --preset debug-x64`
 
-`.cppx/generated/CMakePresets.json`에는 아래 항목이 반영됩니다.
+`.cppx/CMakePresets.json`에는 아래 항목이 반영됩니다.
 
 - `generator: Ninja`
 - `CMAKE_MAKE_PROGRAM`: 관리형 Ninja 바이너리 경로

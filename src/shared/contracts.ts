@@ -7,6 +7,8 @@
   | "test"
   | "pack";
 
+export type CompilerPreference = "mingw" | "msvc";
+
 export type LogLevel =
   | "info"
   | "warn"
@@ -46,6 +48,8 @@ export interface RunCommandPayload {
   projectName?: string;
   dependency?: string;
   preset?: string;
+  compilerPreference?: CompilerPreference;
+  msvcInstallationPath?: string;
 }
 
 export interface RunCommandResult {
@@ -53,20 +57,37 @@ export interface RunCommandResult {
   ok: boolean;
   code: number;
   message: string;
+  workspace?: string;
 }
 
 export interface ToolStatus {
   cmake: boolean;
   ninja: boolean;
   vcpkg: boolean;
-  clangd: boolean;
   cxx: boolean;
+}
+
+export interface CompilerScanResult {
+  msvcAvailable: boolean;
+  msvcCandidates: MsvcCandidate[];
+  msvcDisplayName?: string;
+  msvcVersion?: string;
+  msvcClPath?: string;
+}
+
+export interface MsvcCandidate {
+  installationPath: string;
+  displayName?: string;
+  version?: string;
+  clPath: string;
 }
 
 export interface CppxApi {
   runCommand: (payload: RunCommandPayload) => Promise<RunCommandResult>;
   selectWorkspace: () => Promise<string | null>;
   getDefaultWorkspace: () => Promise<string>;
+  getCppxRoot: () => Promise<string>;
+  getCompilerScan: () => Promise<CompilerScanResult>;
   getToolStatus: () => Promise<ToolStatus>;
   getProjectConfig: (workspace: string) => Promise<ProjectConfigPayload>;
   saveProjectConfig: (

@@ -11,7 +11,8 @@ type ProjectConfig = ProjectConfigPayload;
 
 const CPPX_CONFIG_PATH = path.join(".cppx", "config.toml");
 const LEGACY_PROJECT_CONFIG_PATH = path.join(".cppx", "project.json");
-const GENERATED_ROOT = path.join(".cppx", "generated");
+const GENERATED_ROOT = ".cppx";
+const LEGACY_GENERATED_ROOT = path.join(".cppx", "generated");
 
 function defaultCmakeConfig(): CmakeConfig {
   return {
@@ -22,13 +23,36 @@ function defaultCmakeConfig(): CmakeConfig {
   };
 }
 
-function defaultConfig(projectName: string): ProjectConfig {
+function defaultTargetTripletForCompiler(compilerFamily: Toolchain["compilerFamily"]): string {
+  return compilerFamily === "msvc" ? "x64-windows" : "x64-mingw-dynamic";
+}
+
+function resolveEffectiveTargetTriplet(
+  rawTriplet: string,
+  compilerFamily: Toolchain["compilerFamily"]
+): string {
+  const triplet = rawTriplet.trim();
+  if (triplet.length === 0) {
+    return defaultTargetTripletForCompiler(compilerFamily);
+  }
+
+  if (compilerFamily === "msvc" && /mingw/i.test(triplet)) {
+    return "x64-windows";
+  }
+
+  return triplet;
+}
+
+function defaultConfig(
+  projectName: string,
+  compilerFamily: Toolchain["compilerFamily"] = "mingw"
+): ProjectConfig {
   return {
     name: projectName,
     defaultPreset: "debug-x64",
     sourceFile: "src/main.cpp",
     cxxStandard: 20,
-    targetTriplet: "x64-mingw-dynamic",
+    targetTriplet: defaultTargetTripletForCompiler(compilerFamily),
     dependencies: [],
     cmake: defaultCmakeConfig()
   };
@@ -325,7 +349,7 @@ int main() {
 }
 
 function createGeneratedCMakeLists(config: ProjectConfig): string {
-  const sourceExpr = `\${CMAKE_CURRENT_LIST_DIR}/../../${toPosixPath(config.sourceFile)}`;
+  const sourceExpr = `\${CMAKE_CURRENT_LIST_DIR}/../${toPosixPath(config.sourceFile)}`;
   const customization = createCmakeCustomizationBlock(config);
 
   return `cmake_minimum_required(VERSION 3.28)
@@ -357,6 +381,10 @@ function createGeneratedPresets(
 ): Record<string, unknown> {
   const vcpkgRoot = path.dirname(toolchain.vcpkg);
   const vcpkgToolchain = path.join(vcpkgRoot, "scripts", "buildsystems", "vcpkg.cmake");
+  const targetTriplet = resolveEffectiveTargetTriplet(
+    config.targetTriplet,
+    toolchain.compilerFamily
+  );
 
   const common = {
     generator: "Ninja",
@@ -364,7 +392,7 @@ function createGeneratedPresets(
     cacheVariables: {
       CMAKE_MAKE_PROGRAM: toolchain.ninja,
       CMAKE_CXX_COMPILER: toolchain.cxx,
-      VCPKG_TARGET_TRIPLET: config.targetTriplet
+      VCPKG_TARGET_TRIPLET: targetTriplet
     },
     environment: {
       VCPKG_ROOT: vcpkgRoot,
@@ -379,7 +407,7 @@ function createGeneratedPresets(
       {
         name: "debug-x64",
         displayName: "Debug x64",
-        binaryDir: "${sourceDir}/../../build/debug-x64",
+        binaryDir: "${sourceDir}/../build/debug-x64",
         ...common,
         cacheVariables: {
           ...common.cacheVariables,
@@ -389,7 +417,7 @@ function createGeneratedPresets(
       {
         name: "release-x64",
         displayName: "Release x64",
-        binaryDir: "${sourceDir}/../../build/release-x64",
+        binaryDir: "${sourceDir}/../build/release-x64",
         ...common,
         cacheVariables: {
           ...common.cacheVariables,
@@ -452,8 +480,12 @@ async function syncGeneratedFiles(
 
 function buildToolEnv(toolchain: Toolchain, manifestDir: string): NodeJS.ProcessEnv {
   const vcpkgRoot = path.dirname(toolchain.vcpkg);
+  const baseEnv = toolchain.baseEnv ?? process.env;
+  const basePath = baseEnv.PATH ?? process.env.PATH ?? "";
+
   return {
-    PATH: `${toolchain.envPath.join(";")};${process.env.PATH ?? ""}`,
+    ...baseEnv,
+    PATH: `${toolchain.envPath.join(";")};${basePath}`,
     VCPKG_ROOT: vcpkgRoot,
     VCPKG_MANIFEST_DIR: manifestDir,
     CXX: toolchain.cxx
@@ -468,6 +500,7 @@ async function ensureBuildDirUsesCompiler(
   workspace: string,
   preset: string,
   cxxCompiler: string,
+  sourceRoot: string,
   logger: CppxLogger
 ): Promise<void> {
   const buildDir = path.join(workspace, "build", preset);
@@ -484,11 +517,23 @@ async function ensureBuildDirUsesCompiler(
 
   const configuredCompiler = normalizePathForCompare(match[1].trim());
   const expectedCompiler = normalizePathForCompare(cxxCompiler);
-  if (configuredCompiler === expectedCompiler) {
+  const sourceMatch = cache.match(/^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$/m);
+  const configuredSource = sourceMatch?.[1]?.trim();
+  const expectedSource = path.resolve(sourceRoot);
+  const isSourceMatched =
+    configuredSource
+      ? normalizePathForCompare(configuredSource) === normalizePathForCompare(expectedSource)
+      : true;
+
+  if (configuredCompiler === expectedCompiler && isSourceMatched) {
     return;
   }
 
-  logger.warn("build", `컴파일러가 변경되어 preset '${preset}'의 build 디렉터리를 다시 생성합니다.`);
+  if (configuredCompiler !== expectedCompiler) {
+    logger.warn("build", `컴파일러가 변경되어 preset '${preset}'의 build 디렉터리를 다시 생성합니다.`);
+  } else {
+    logger.warn("build", `CMake source 경로가 변경되어 preset '${preset}'의 build 디렉터리를 다시 생성합니다.`);
+  }
   await fs.rm(buildDir, { recursive: true, force: true });
 }
 
@@ -500,14 +545,14 @@ function createVSCodeTasks(projectName: string): Record<string, unknown> {
         label: "cppx: configure debug",
         type: "shell",
         command: "cmake --preset debug-x64",
-        options: { cwd: "${workspaceFolder}/.cppx/generated" },
+        options: { cwd: "${workspaceFolder}/.cppx" },
         group: "build"
       },
       {
         label: "cppx: build debug",
         type: "shell",
         command: "cmake --build --preset debug-x64",
-        options: { cwd: "${workspaceFolder}/.cppx/generated" },
+        options: { cwd: "${workspaceFolder}/.cppx" },
         dependsOn: "cppx: configure debug",
         group: "build"
       },
@@ -573,37 +618,53 @@ export async function initProject(
   projectName: string | undefined,
   toolchain: Toolchain,
   logger: CppxLogger
-): Promise<void> {
-  const name = projectName?.trim() || path.basename(workspace);
-  const configPath = path.join(workspace, CPPX_CONFIG_PATH);
+): Promise<string> {
+  const parentWorkspace = path.resolve(workspace);
+  const requestedName = projectName?.trim() ?? "";
+  const name = requestedName.length > 0 ? requestedName : path.basename(parentWorkspace);
+
+  if (
+    name.length === 0 ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\")
+  ) {
+    throw new CppxError("프로젝트 이름이 올바르지 않습니다.");
+  }
+
+  const targetWorkspace = parentWorkspace;
+
+  const configPath = path.join(targetWorkspace, CPPX_CONFIG_PATH);
 
   if (await pathExists(configPath)) {
     throw new CppxError("이 작업 폴더는 이미 cppx로 초기화되어 있습니다.");
   }
 
-  await ensureDir(workspace);
-  await ensureDir(path.join(workspace, "src"));
-  await ensureDir(path.join(workspace, ".vscode"));
-  await ensureDir(path.join(workspace, ".cppx"));
+  await ensureDir(targetWorkspace);
+  await ensureDir(path.join(targetWorkspace, "src"));
+  await ensureDir(path.join(targetWorkspace, ".vscode"));
+  await ensureDir(path.join(targetWorkspace, ".cppx"));
 
-  const config = defaultConfig(name);
-  await writeProjectConfigToml(workspace, config);
+  const config = defaultConfig(name, toolchain.compilerFamily);
+  await writeProjectConfigToml(targetWorkspace, config);
 
-  const sourcePath = path.join(workspace, config.sourceFile);
+  const sourcePath = path.join(targetWorkspace, config.sourceFile);
   if (!(await pathExists(sourcePath))) {
     await writeTextFile(sourcePath, createMainCppTemplate(name));
   }
 
-  await syncGeneratedFiles(workspace, config, toolchain);
-  await writeJsonFile(path.join(workspace, ".vscode", "tasks.json"), createVSCodeTasks(name));
-  await writeJsonFile(path.join(workspace, ".vscode", "launch.json"), createVSCodeLaunch(name));
+  await syncGeneratedFiles(targetWorkspace, config, toolchain);
+  await writeJsonFile(path.join(targetWorkspace, ".vscode", "tasks.json"), createVSCodeTasks(name));
+  await writeJsonFile(path.join(targetWorkspace, ".vscode", "launch.json"), createVSCodeLaunch(name));
 
-  const gitignorePath = path.join(workspace, ".gitignore");
+  const gitignorePath = path.join(targetWorkspace, ".gitignore");
   if (!(await pathExists(gitignorePath))) {
     await writeTextFile(gitignorePath, "build/\n.vscode/*.log\n*.obj\n*.pdb\n");
   }
 
-  logger.success("init", `프로젝트 '${name}' 초기화 완료: ${workspace}`);
+  logger.success("init", `프로젝트 '${name}' 초기화 완료: ${targetWorkspace}`);
+  return targetWorkspace;
 }
 
 export async function cleanupLegacyWorkspaceFiles(
@@ -621,6 +682,12 @@ export async function cleanupLegacyWorkspaceFiles(
       await fs.rm(target, { force: true });
       logger.info("system", `레거시 파일 삭제: ${target}`);
     }
+  }
+
+  const legacyGeneratedPath = path.join(workspace, LEGACY_GENERATED_ROOT);
+  if (await pathExists(legacyGeneratedPath)) {
+    await fs.rm(legacyGeneratedPath, { recursive: true, force: true });
+    logger.info("system", `레거시 generated 폴더 삭제: ${legacyGeneratedPath}`);
   }
 }
 
@@ -656,7 +723,7 @@ export async function buildWithPreset(
   const env = buildToolEnv(toolchain, generatedRoot);
 
   logger.info("build", `컴파일러: ${toolchain.cxx}`);
-  await ensureBuildDirUsesCompiler(workspace, preset, toolchain.cxx, logger);
+  await ensureBuildDirUsesCompiler(workspace, preset, toolchain.cxx, generatedRoot, logger);
 
   await runSpawn(
     {

@@ -1,6 +1,7 @@
 import type { CppxAction } from "@shared/contracts";
 
-export type ToolName = "cmake" | "ninja" | "vcpkg" | "clangd" | "cxx";
+export type ToolName = "cmake" | "ninja" | "vcpkg" | "cxx";
+export type CompilerFamily = "mingw" | "msvc";
 
 export interface ToolRecord {
   name: ToolName;
@@ -18,9 +19,10 @@ export interface Toolchain {
   cmake: string;
   ninja: string;
   vcpkg: string;
-  clangd: string;
   cxx: string;
   envPath: string[];
+  compilerFamily: CompilerFamily;
+  baseEnv?: NodeJS.ProcessEnv;
 }
 
 export interface CommandContext {
