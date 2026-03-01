@@ -1,42 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
+    --background: 220 23% 97%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --primary: 199 89% 44%;
+    --primary: 222 47% 11%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 94%;
+    --secondary: 220 16% 96%;
     --secondary-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --muted: 210 40% 95%;
+    --muted: 220 13% 95%;
     --muted-foreground: 215 16% 47%;
-    --accent: 187 78% 41%;
-    --accent-foreground: 210 40% 98%;
-    --border: 214 32% 88%;
-    --input: 214 32% 88%;
-    --ring: 199 89% 44%;
-    --destructive: 0 84% 55%;
+    --accent: 214 32% 91%;
+    --accent-foreground: 222 47% 11%;
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
+    --ring: 221 83% 53%;
+    --destructive: 0 74% 42%;
     --destructive-foreground: 0 0% 100%;
-    --radius: 0.75rem;
+    --radius: 0.9rem;
   }
 
   * {
     @apply border-border;
   }
 
+  html,
+  body {
+    min-height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     min-height: 100vh;
+    font-family: "Noto Sans KR", ui-sans-serif, system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 0% 0%, hsl(214 86% 97%), transparent 42%),
+      radial-gradient(circle at 100% 100%, hsl(222 40% 93%), transparent 44%),
+      hsl(var(--background));
+    position: relative;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
     background-image:
-      radial-gradient(circle at 10% 10%, rgba(14, 165, 233, 0.2), transparent 34%),
-      radial-gradient(circle at 90% 0%, rgba(20, 184, 166, 0.18), transparent 30%),
-      linear-gradient(180deg, #f8fafc 0%, #eef8ff 100%);
+      linear-gradient(hsl(var(--border) / 0.2) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.16) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(ellipse at center, black 55%, transparent 100%);
+    opacity: 0.42;
+    z-index: -1;
   }
 }
 

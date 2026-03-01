@@ -36,7 +36,7 @@ export default {
         sm: "calc(var(--radius) - 4px)"
       },
       fontFamily: {
-        sans: ["'Sora'", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["'Noto Sans KR'", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "monospace"]
       }
     }
