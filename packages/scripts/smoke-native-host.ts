@@ -30,12 +30,8 @@ function createLogger(): CppxLogger {
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
-  const usesManagedBuildTools = process.platform === "win32";
-  const initDependencyBackend = process.platform === "win32" ? "vcpkg" : "none";
-  const toolPolicy =
-    usesManagedBuildTools
-      ? { mode: "managed" as const, version: "default" }
-      : { mode: "system" as const, version: "latest" };
+  const dependencyBackend = "none" as const;
+  const toolPolicy = { mode: "system" as const, version: "latest" };
   const cxxPolicy =
     process.platform === "win32"
       ? { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
@@ -50,7 +46,7 @@ async function main(): Promise<void> {
         vcpkg: toolPolicy,
         cxx: cxxPolicy
       },
-      initDependencyBackend
+      dependencyBackend
     );
 
     await initProject(workspace, "smoke-app", toolchain, logger);
@@ -58,7 +54,7 @@ async function main(): Promise<void> {
     const current = await loadProjectConfig(workspace);
     const updated = await saveProjectConfig(workspace, {
       ...current,
-      dependencyBackend: "none",
+      dependencyBackend,
       tools: {
         cmake: toolPolicy,
         ninja: toolPolicy,
