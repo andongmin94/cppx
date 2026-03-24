@@ -13,6 +13,7 @@
     "preview": "node ./scripts/run-electron-vite.mjs preview",
     "typecheck": "tsc --noEmit",
     "test": "node ./scripts/run-tests.mjs",
+    "test:ci": "node ./scripts/run-tests-ci.mjs",
     "smoke:native": "tsx ./scripts/smoke-native-host.ts",
     "cppx": "tsx src/main/cli.ts"
   },
