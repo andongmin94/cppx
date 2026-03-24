@@ -2,6 +2,14 @@
   "name": "cppx",
   "version": "0.1.0",
   "description": "Cargo-like C++ workflow with native host support and Electron UI",
+  "homepage": "https://cppx.andongmin.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andongmin94/cppx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/andongmin94/cppx/issues"
+  },
   "main": "./out/main/index.js",
   "author": "cppx",
   "license": "MIT",
@@ -18,6 +26,15 @@
     "smoke:native": "tsx ./scripts/smoke-native-host.ts",
     "cppx": "tsx src/main/cli.ts"
   },
+  "keywords": [
+    "cpp",
+    "cmake",
+    "vcpkg",
+    "conan",
+    "electron",
+    "cli",
+    "cross-platform"
+  ],
   "dependencies": {
     "@radix-ui/react-label": "^2.1.7",
     "@radix-ui/react-scroll-area": "^1.2.10",

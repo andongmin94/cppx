@@ -1,7 +1,7 @@
 import { defineConfig } from "vitepress";
 
 const siteTitle = "cppx";
-const siteDescription = "Cargo 스타일의 C++ 워크플로";
+const siteDescription = "Windows, macOS, Linux에서 쓰는 Cargo 스타일 C++ 워크플로 도구";
 const siteUrl = "https://cppx.andongmin.com";
 const siteImage = `${siteUrl}/logo.png`;
 
@@ -41,7 +41,7 @@ export default defineConfig({
     },
 
     footer: {
-      message: "Released under the MIT License",
+      message: "MIT 라이선스로 배포됩니다",
       copyright: "Copyright © 2026 안동민"
     },
 

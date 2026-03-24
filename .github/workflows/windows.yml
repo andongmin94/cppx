@@ -57,6 +57,9 @@ jobs:
       - name: Test
         run: npm run test:ci
 
+      - name: Build app
+        run: npm run build
+
       - name: Prepare Windows native smoke
         if: runner.os == 'Windows'
         run: npm run cppx -- install-tools --compiler msvc
@@ -108,3 +111,23 @@ jobs:
           npm run cppx -- run $workspace
           npm run cppx -- test $workspace
           npm run cppx -- pack $workspace
+
+  docs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Build docs
+        run: npm run docs-build
