@@ -27,6 +27,22 @@ function createLogger(): CppxLogger {
   });
 }
 
+function createInitToolchain(
+  workspace: string,
+  toolchain: Awaited<ReturnType<typeof resolveToolchainOrThrow>>
+) {
+  if (process.platform !== "win32" || toolchain.vcpkg) {
+    return toolchain;
+  }
+
+  return {
+    ...toolchain,
+    // initProject still seeds Windows projects with the default vcpkg backend
+    // before this smoke script immediately rewrites the config to dependency_backend = "none".
+    vcpkg: path.join(workspace, ".cppx", "bootstrap", "vcpkg.exe")
+  };
+}
+
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
@@ -48,8 +64,9 @@ async function main(): Promise<void> {
       },
       dependencyBackend
     );
+    const initToolchain = createInitToolchain(workspace, toolchain);
 
-    await initProject(workspace, "smoke-app", toolchain, logger);
+    await initProject(workspace, "smoke-app", initToolchain, logger);
 
     const current = await loadProjectConfig(workspace);
     const updated = await saveProjectConfig(workspace, {
