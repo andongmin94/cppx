@@ -31,6 +31,7 @@ async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
   const usesManagedBuildTools = process.platform === "win32";
+  const initDependencyBackend = process.platform === "win32" ? "vcpkg" : "none";
   const toolPolicy =
     usesManagedBuildTools
       ? { mode: "managed" as const, version: "default" }
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
         vcpkg: toolPolicy,
         cxx: cxxPolicy
       },
-      "none"
+      initDependencyBackend
     );
 
     await initProject(workspace, "smoke-app", toolchain, logger);
