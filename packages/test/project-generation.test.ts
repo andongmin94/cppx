@@ -8,6 +8,7 @@ import {
   createTempDir,
   createToolchain,
   createLogger,
+  normalizeNewlines,
   readFixtureJson,
   readFixtureText,
   readJson,
@@ -27,8 +28,8 @@ test("initProject generates the current baseline files for the active host", asy
 
     if (process.platform === "win32") {
       assert.equal(
-        await readText(path.join(workspace, ".cppx", "CMakeLists.txt")),
-        await readFixtureText("init-mingw", "CMakeLists.txt")
+        normalizeNewlines(await readText(path.join(workspace, ".cppx", "CMakeLists.txt"))),
+        normalizeNewlines(await readFixtureText("init-mingw", "CMakeLists.txt"))
       );
       assert.deepEqual(
         await readJson(path.join(workspace, ".cppx", "CMakePresets.json")),

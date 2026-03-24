@@ -45,6 +45,10 @@ export async function readFixtureJson<T>(...segments: string[]): Promise<T> {
   return readJson(path.join(fixtureRoot(), ...segments));
 }
 
+export function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/g, "\n");
+}
+
 export async function withEnv<T>(
   key: string,
   value: string | undefined,
