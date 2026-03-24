@@ -66,11 +66,16 @@ async function main(): Promise<void> {
         cxx: cxxPolicy
       }
     });
+    const activeToolchain = await resolveToolchainOrThrow(
+      logger,
+      updated.tools,
+      updated.dependencyBackend
+    );
 
-    await buildWithPreset(workspace, updated.defaultPreset, toolchain, logger);
-    await runPresetBinary(workspace, updated.defaultPreset, toolchain, logger);
-    await testPreset(workspace, updated.defaultPreset, toolchain, logger);
-    await packagePreset(workspace, updated.defaultPreset, toolchain, logger);
+    await buildWithPreset(workspace, updated.defaultPreset, activeToolchain, logger);
+    await runPresetBinary(workspace, updated.defaultPreset, activeToolchain, logger);
+    await testPreset(workspace, updated.defaultPreset, activeToolchain, logger);
+    await packagePreset(workspace, updated.defaultPreset, activeToolchain, logger);
 
     console.log(`Smoke success: ${workspace}`);
   } finally {
