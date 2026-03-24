@@ -11,6 +11,7 @@ import {
   removeDir,
   withEnv,
   withHostDataRoot,
+  writeExecutable,
   writeText
 } from "./support/helpers";
 
@@ -111,11 +112,11 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
     const vcpkg = path.join(toolPath, hostAdapter.getExecutableName("vcpkg"));
     const cxx = path.join(toolPath, hostAdapter.getExecutableName("clang++"));
 
-    await writeText(cmake, "");
-    await writeText(ninja, "");
-    await writeText(cxx, "");
+    await writeExecutable(cmake);
+    await writeExecutable(ninja);
+    await writeExecutable(cxx);
     if (dependencyBackend === "vcpkg") {
-      await writeText(vcpkg, "");
+      await writeExecutable(vcpkg);
     }
 
     await withEnv(

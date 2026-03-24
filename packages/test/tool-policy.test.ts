@@ -5,11 +5,17 @@ import type { ToolStatus } from "../src/shared/contracts";
 import type { HostPlatform } from "../src/main/cppx/platform";
 import type { ToolSourceKind } from "../src/main/cppx/types";
 import { isPinnedToolVersion, shouldReuseManagedArchiveTool } from "../src/main/cppx/installers";
-import { getToolManifestPath, getToolRoot, readToolManifest, upsertToolRecord } from "../src/main/cppx/paths";
+import {
+  getCppxRoot,
+  getToolManifestPath,
+  getToolRoot,
+  readToolManifest,
+  upsertToolRecord
+} from "../src/main/cppx/paths";
 import {
   createTempDir,
   removeDir,
-  withEnv,
+  withHostDataRoot,
   writeJson
 } from "./support/helpers";
 
@@ -44,7 +50,7 @@ test("tool manifest preserves policy metadata for managed installs", async () =>
   const localAppData = await createTempDir("tool-policy-manifest");
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       const record = createRichToolRecord({
         mode: "managed",
         sourceKind: "catalog-archive",
@@ -70,8 +76,8 @@ test("legacy tool manifests keep metadata during migration", async () => {
   const localAppData = await createTempDir("tool-policy-legacy");
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
-      const legacyManifestPath = path.join(localAppData, "cppx", "tools", "tools-manifest.json");
+    await withHostDataRoot(localAppData, async () => {
+      const legacyManifestPath = path.join(getCppxRoot(), "tools", "tools-manifest.json");
       const record = createRichToolRecord({
         mode: "system",
         sourceKind: "system-detected",

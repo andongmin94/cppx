@@ -18,6 +18,13 @@ export async function writeText(targetPath: string, content: string): Promise<vo
   await fs.writeFile(targetPath, content, "utf-8");
 }
 
+export async function writeExecutable(targetPath: string, content = ""): Promise<void> {
+  await writeText(targetPath, content);
+  if (process.platform !== "win32") {
+    await fs.chmod(targetPath, 0o755);
+  }
+}
+
 export async function writeJson(targetPath: string, value: unknown): Promise<void> {
   await writeText(targetPath, `${JSON.stringify(value, null, 2)}\n`);
 }

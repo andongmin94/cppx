@@ -11,7 +11,7 @@ import {
   createTempDir,
   createToolchain,
   removeDir,
-  withEnv,
+  withHostDataRoot,
   writeText
 } from "./support/helpers";
 
@@ -124,7 +124,7 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
   const { logger } = createLogger();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await initProject(workspace, "v2-save-app", createToolchain(), logger);
 
       const current = await loadProjectConfig(workspace);

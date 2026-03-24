@@ -16,7 +16,7 @@ import {
   readJson,
   readText,
   removeDir,
-  withEnv
+  withHostDataRoot
 } from "./support/helpers";
 
 test("syncGeneratedFiles supports conan backend and custom preset matrix", async () => {
@@ -25,7 +25,7 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
   const { logger } = createLogger();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await initProject(workspace, "conan-app", createToolchain(), logger);
 
       const current = await loadProjectConfig(workspace);
@@ -99,7 +99,7 @@ test("syncGeneratedFiles supports none backend without dependency manifests", as
   const { logger } = createLogger();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await initProject(workspace, "plain-app", createToolchain(), logger);
 
       const current = await loadProjectConfig(workspace);
@@ -141,7 +141,7 @@ test("runPresetBinary rejects presets marked as non-runnable", async () => {
   const { logger } = createLogger();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await initProject(workspace, "runner-app", createToolchain(), logger);
 
       const current = await loadProjectConfig(workspace);

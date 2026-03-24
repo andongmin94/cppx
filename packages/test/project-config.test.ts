@@ -4,13 +4,14 @@ import test from "node:test";
 import { addDependency, loadProjectConfig, saveProjectConfig } from "../src/main/cppx/project";
 import { getDefaultPresetName } from "../src/main/cppx/config";
 import { CppxError } from "../src/main/cppx/errors";
+import { getHostAdapter } from "../src/main/cppx/platform";
 import {
   createTempDir,
   createToolchain,
   createLogger,
   readText,
   removeDir,
-  withEnv,
+  withHostDataRoot,
   writeJson
 } from "./support/helpers";
 import { initProject } from "../src/main/cppx/project";
@@ -18,9 +19,10 @@ import { initProject } from "../src/main/cppx/project";
 test("loadProjectConfig migrates the legacy project.json and vcpkg.json files", async () => {
   const localAppData = await createTempDir("config-root");
   const workspace = await createTempDir("legacy-workspace");
+  const hostAdapter = getHostAdapter();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await writeJson(path.join(workspace, ".cppx", "project.json"), {
         name: "legacy-app"
       });
@@ -33,7 +35,7 @@ test("loadProjectConfig migrates the legacy project.json and vcpkg.json files", 
       assert.equal(config.name, "legacy-app");
       assert.equal(config.defaultPreset, getDefaultPresetName());
       assert.equal(config.sourceFile, "src/main.cpp");
-      assert.equal(config.targetTriplet, "x64-mingw-dynamic");
+      assert.equal(config.targetTriplet, hostAdapter.getDefaultTargetTriplet("mingw"));
       assert.deepEqual(config.dependencies, ["fmt", "boost-asio"]);
       assert.match(
         await readText(path.join(workspace, ".cppx", "config.toml")),
@@ -52,7 +54,7 @@ test("saveProjectConfig writes normalized config and addDependency avoids duplic
   const { logger } = createLogger();
 
   try {
-    await withEnv("LOCALAPPDATA", localAppData, async () => {
+    await withHostDataRoot(localAppData, async () => {
       await initProject(workspace, "save-app", createToolchain(), logger);
 
       const current = await loadProjectConfig(workspace);
