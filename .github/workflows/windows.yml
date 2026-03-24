@@ -60,6 +60,14 @@ jobs:
       - name: Build app
         run: npm run build
 
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppx-app-${{ matrix.os }}
+          path: packages/out
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Prepare Windows native smoke
         if: runner.os == 'Windows'
         run: npm run cppx -- install-tools --compiler msvc
@@ -120,6 +128,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
 
       - name: Install docs dependencies
         working-directory: docs
@@ -128,3 +138,11 @@ jobs:
       - name: Build docs
         working-directory: docs
         run: npm run docs-build
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppx-docs-site
+          path: docs/.vitepress/dist
+          if-no-files-found: error
+          retention-days: 7

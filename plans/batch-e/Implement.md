@@ -52,4 +52,4 @@ Stop before continuing when:
 
 - [x] M1 complete
 - [x] M2 complete
-- [ ] M3 complete
+- [x] M3 complete

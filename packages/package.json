@@ -1,5 +1,6 @@
 {
   "name": "cppx",
+  "productName": "cppx",
   "version": "0.1.0",
   "description": "Cargo-like C++ workflow with native host support and Electron UI",
   "homepage": "https://cppx.andongmin.com",
@@ -15,6 +16,9 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node ./scripts/run-electron-vite.mjs dev",
     "build": "electron-vite build",
