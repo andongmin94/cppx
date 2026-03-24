@@ -17,7 +17,7 @@ CMake 설정을 직접 작성하고, 빌드 스크립트를 만들고, 패키지
 - **Cargo 스타일 CLI** — `init`, `add`, `build`, `run`, `test`, `pack` 명령어로 프로젝트를 빠르게 관리합니다
 - **호스트별 도구 정책** — Windows에서는 관리형 CMake/Ninja/vcpkg/컴파일러 설치를 지원하고, macOS/Linux에서는 시스템 도구 기반 네이티브 워크플로를 지원합니다
 - **단일 설정 원본** — `.cppx/config.toml` 하나만 관리하면 `CMakeLists.txt`, `CMakePresets.json`, backend manifest(`vcpkg.json` 또는 `conanfile.txt`)가 자동 생성됩니다
-- **Electron GUI** — 프로젝트 탐색, 빌드, 실시간 로그 확인까지 마우스 클릭으로 수행할 수 있습니다
+- **Electron GUI** — 프로젝트 탐색, backend/tool policy/preset 편집, 빌드, 실시간 로그 확인까지 마우스 클릭으로 수행할 수 있습니다
 - **VSCode 통합** — 프로젝트 초기화 시 `.vscode/tasks.json`과 `launch.json`이 자동 생성됩니다
 
 ## 호스트 지원
@@ -143,6 +143,14 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기` / `config 저장` 
 
 `install-tools`는 `--compiler <mingw|msvc>`와 `--msvc-installation-path <path>`를 지원합니다.
 `status`는 가능한 경우 `managed/system`, 해석된 버전, 소스 종류, 실행 파일 경로까지 함께 표시합니다.
+
+## 마이그레이션 요약
+
+- 기존 `.cppx/project.json`과 루트 `vcpkg.json`은 계속 읽히며, 현재 버전에서는 `.cppx/config.toml` v2 형식으로 자동 마이그레이션됩니다
+- 이제 설정의 중심은 `.cppx/config.toml`입니다. `.cppx/CMakeLists.txt`, `.cppx/CMakePresets.json`, backend manifest, `.vscode/tasks.json`, `.vscode/launch.json`은 모두 생성물로 취급하는 것이 맞습니다
+- 고정된 `debug/release` 쌍만 쓰던 프로젝트도 계속 동작하지만, 이제는 `[[presets]]`와 `default_preset`으로 프리셋 매트릭스를 직접 선언할 수 있습니다
+- 의존성 방식은 `dependency_backend = "vcpkg" | "conan" | "none"`로 선택하고, 도구 설치 방식은 `[tools.*]`의 `managed/system` 정책으로 제어합니다
+- 자세한 전환 절차는 [docs/guide/migration.md](C:/Users/Administrator/Desktop/repo/cppx/docs/guide/migration.md)에 정리했습니다
 
 ## 프로젝트 구조
 

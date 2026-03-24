@@ -1,6 +1,6 @@
 # GUI 사용법
 
-cppx는 CLI뿐 아니라 Electron 기반 GUI도 제공합니다. 코드를 직접 치지 않고도 프로젝트 관리, 빌드 실행, 로그 확인을 모두 할 수 있습니다.
+cppx는 CLI뿐 아니라 Electron 기반 GUI도 제공합니다. 코드를 직접 치지 않고도 프로젝트 관리, backend/tool policy/preset 편집, 빌드 실행, 로그 확인을 모두 할 수 있습니다.
 
 ## GUI 실행하기
 
@@ -10,34 +10,54 @@ npm install
 npm run dev
 ```
 
-실행하면 Electron 앱 창이 열리며, 상단에 현재 작업 경로와 선택된 프리셋이 표시됩니다.
+실행하면 Electron 앱 창이 열리며, 상단에 현재 작업 폴더, 기본 프리셋, 의존성 백엔드가 표시됩니다.
 
-## 탭 구성
+## 화면 구성
 
-GUI는 세 개의 탭으로 구성되어 있습니다.
+GUI는 좌측 탭 버튼과 우측 작업 영역으로 구성되어 있습니다.
 
-### 탐색 탭
+- **Workspace** — 프로젝트 경로, 설정 편집, 의존성 추가, 프리셋 매트릭스를 다룹니다
+- **Build** — Build / Run / Test / Pack과 툴체인 상태를 다룹니다
+- **Logs** — 실행 로그를 실시간으로 확인합니다
 
-프로젝트를 탐색하고 설정하는 공간입니다.
+상단 헤더에는 현재 작업 폴더, 기본 프리셋, 의존성 백엔드, 현재 탭이 함께 표시됩니다.
+
+## Workspace 탭
+
+프로젝트를 탐색하고 `.cppx/config.toml`에 대응하는 주요 설정을 편집하는 공간입니다.
 
 - **작업 폴더 선택** — 경로를 직접 입력하거나 찾아보기 버튼으로 폴더를 선택합니다
 - **프로젝트 초기화** — 프로젝트 이름을 입력하고 **Init** 버튼을 누르면 `cppx init`이 실행됩니다
-- **CMake 설정 편집** — `compile_definitions`, `compile_options`, `include_directories`, `link_libraries`를 UI에서 수정할 수 있습니다. **config 불러오기**로 현재 값을 가져오고, **config 저장**으로 `config.toml`에 반영합니다
-- **의존성 관리** — 패키지명을 입력하고 **Add** 버튼으로 현재 backend에 맞는 의존성을 추가합니다. `none` backend에서는 추가가 거부되며, 현재 등록된 의존성은 Badge 목록으로 확인할 수 있습니다
+- **프로젝트 / 백엔드 설정** — `source_file`, `cxx_standard`, `dependency_backend`, `default_preset`, 기본 `target_triplet`을 편집합니다
+- **도구 정책** — `cmake`, `ninja`, `vcpkg`, `cxx`의 `mode`, `version`을 조정합니다. `cxx`는 `preferred_family`, `msvc_installation_path`도 함께 편집할 수 있습니다
+- **CMake 설정** — `compile_definitions`, `compile_options`, `include_directories`, `link_libraries`를 수정합니다
+- **의존성 추가** — 패키지명을 입력하고 **Add** 버튼으로 현재 backend에 맞는 의존성을 추가합니다. `none` backend에서는 추가가 거부되며, 현재 등록된 의존성은 Badge 목록으로 확인할 수 있습니다
+- **프리셋 매트릭스** — `[[presets]]` 목록을 직접 추가, 삭제, 편집합니다. `name`, `display_name`, `build_type`, `target_triplet`, `runnable`을 수정할 수 있습니다
 
-### 빌드 탭
+### config 저장 / 불러오기
 
-빌드, 실행, 테스트, 패키징을 수행하는 공간입니다.
+Workspace 탭의 여러 카드에서 수정한 값은 **CMake 설정** 카드의 버튼을 기준으로 함께 동기화됩니다.
+
+- **config 저장** — 현재 UI 상태를 `.cppx/config.toml`에 저장합니다
+- **config 불러오기** — 현재 작업 폴더의 설정을 다시 읽어와 UI 전체를 갱신합니다
+
+즉, 저장 버튼은 CMake 설정만이 아니라 backend, tool policy, preset matrix까지 함께 반영한다고 생각하면 됩니다.
+
+## Build 탭
+
+빌드, 실행, 테스트, 패키징과 툴체인 상태를 다루는 공간입니다.
 
 - **프리셋 선택** — `.cppx/config.toml`에 정의된 프리셋 목록에서 원하는 항목을 선택합니다
 - **액션 버튼** — Build, Run, Test, Pack 네 가지 버튼으로 해당 작업을 실행합니다
-- **툴체인 상태** — CMake, Ninja, vcpkg, C++ 컴파일러 각각의 설치 여부가 Badge로 표시됩니다
+- **프리셋 실행 가능 여부** — 선택한 프리셋이 `runnable = false`이면 Run 버튼이 비활성화됩니다
+- **툴체인 상태** — CMake, Ninja, vcpkg, C++ 컴파일러 각각의 설치 여부와 상세 메타데이터가 표시됩니다
   - `준비됨` — 설치 완료
   - `누락` — 설치 필요
 - **도구 설치** — **설치/업데이트** 버튼은 현재 호스트 정책에 따라 관리형 도구를 설치하거나 system 도구 상태를 다시 확인합니다. 진행률은 프로그레스 바로 확인할 수 있습니다
-- **컴파일러 선택** — MSVC가 감지되면 설치된 인스턴스 목록에서 원하는 버전을 고르거나, MinGW를 대신 설치하도록 선택할 수 있습니다
+- **툴체인 다시 검사** — 현재 manifest와 PATH/MSVC 탐지를 기준으로 상태를 새로 읽습니다
+- **컴파일러 선택 대화상자** — Windows에서 MSVC가 감지되면 설치할 컴파일러를 고르는 대화상자가 열릴 수 있습니다
 
-### 로그 탭
+## Logs 탭
 
 명령 실행 과정에서 발생하는 로그를 실시간으로 확인합니다.
 

@@ -219,3 +219,5 @@ msvc_installation_path = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Buil
 이전 버전의 `.cppx/project.json`과 루트 `vcpkg.json`은 계속 자동 마이그레이션됩니다.
 
 마이그레이션이 일어나면 v2 형식의 `.cppx/config.toml`이 새로 생성됩니다.
+
+프리셋 매트릭스, backend 선택, tool policy까지 포함한 전환 체크리스트는 [마이그레이션 가이드](./migration.md)에 따로 정리했습니다.

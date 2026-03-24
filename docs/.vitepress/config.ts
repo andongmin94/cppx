@@ -76,6 +76,10 @@ export default defineConfig({
               link: "/guide/config",
             },
             {
+              text: "마이그레이션 가이드",
+              link: "/guide/migration",
+            },
+            {
               text: "GUI 사용법",
               link: "/guide/gui",
             },
