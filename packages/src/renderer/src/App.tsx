@@ -445,15 +445,38 @@ function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPo
   };
 }
 
-function createNewPreset(index: number): PresetConfigPayload {
-  return {
-    name: `preset-${index + 1}`,
-    displayName: "",
-    buildType: undefined,
-    targetTriplet: "",
-    runnable: true
-  };
-}
+const toToolPoliciesPayload = (
+  toolPolicies: Required<ProjectToolPoliciesPayload>
+): ProjectToolPoliciesPayload => ({
+  cmake: {
+    mode: toolPolicies.cmake.mode,
+    version: toolPolicies.cmake.version
+  },
+  ninja: {
+    mode: toolPolicies.ninja.mode,
+    version: toolPolicies.ninja.version
+  },
+  vcpkg: {
+    mode: toolPolicies.vcpkg.mode,
+    version: toolPolicies.vcpkg.version
+  },
+  cxx: {
+    mode: toolPolicies.cxx.mode,
+    version: toolPolicies.cxx.version,
+    preferredFamily: toolPolicies.cxx.preferredFamily,
+    ...(toolPolicies.cxx.msvcInstallationPath?.trim()
+      ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+      : {})
+  }
+});
+
+const createNewPreset = (index: number): PresetConfigPayload => ({
+  name: `preset-${index + 1}`,
+  displayName: "",
+  buildType: undefined,
+  targetTriplet: "",
+  runnable: true
+});
 
 function getDependencyDescription(backend: DependencyBackend): string {
   switch (backend) {
@@ -1081,7 +1104,28 @@ export default function App() {
     }
 
     if (action === "install-tools" || action === "init") {
-      payloadToolPolicies = toToolPoliciesPayload(toolPolicies);
+      payloadToolPolicies = {
+        cmake: {
+          mode: toolPolicies.cmake.mode,
+          version: toolPolicies.cmake.version
+        },
+        ninja: {
+          mode: toolPolicies.ninja.mode,
+          version: toolPolicies.ninja.version
+        },
+        vcpkg: {
+          mode: toolPolicies.vcpkg.mode,
+          version: toolPolicies.vcpkg.version
+        },
+        cxx: {
+          mode: toolPolicies.cxx.mode,
+          version: toolPolicies.cxx.version,
+          preferredFamily: toolPolicies.cxx.preferredFamily,
+          ...(toolPolicies.cxx.msvcInstallationPath?.trim()
+            ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+            : {})
+        }
+      };
       payloadDependencyBackend = dependencyBackend;
     }
 
