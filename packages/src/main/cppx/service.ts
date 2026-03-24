@@ -97,6 +97,17 @@ export class CppxService {
     payload: RunCommandPayload
   ): Promise<DependencyBackend> {
     const hostDefaultBackend = hostAdapter.getDefaultDependencyBackend();
+    const requestedBackend = payload.dependencyBackend;
+
+    if (
+      requestedBackend === "vcpkg" ||
+      requestedBackend === "conan" ||
+      requestedBackend === "none"
+    ) {
+      if (payload.action === "init" || payload.action === "install-tools") {
+        return requestedBackend;
+      }
+    }
 
     if (payload.action === "init") {
       return hostDefaultBackend;

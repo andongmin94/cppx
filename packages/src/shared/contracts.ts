@@ -86,6 +86,7 @@ export interface RunCommandPayload {
   projectName?: string;
   dependency?: string;
   preset?: string;
+  dependencyBackend?: DependencyBackend;
   compilerPreference?: CompilerPreference;
   msvcInstallationPath?: string;
   toolPolicies?: ProjectToolPoliciesPayload;

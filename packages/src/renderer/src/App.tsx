@@ -1,12 +1,18 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CompilerPreference,
   CompilerScanResult,
   CppxAction,
   CppxApi,
+  DependencyBackend,
   LogEntry,
+  PresetConfigPayload,
   ProjectConfigPayload,
+  ProjectToolPoliciesPayload,
   RunCommandPayload,
   RunCommandResult,
+  ToolInstallMode,
+  ToolStatusDetail,
   ToolStatus
 } from "@shared/contracts";
 import { Badge } from "@renderer/components/ui/badge";
@@ -37,8 +43,10 @@ import {
   Loader2,
   PackagePlus,
   Play,
+  Plus,
   RefreshCcw,
   Terminal,
+  Trash2,
   Wrench,
   type LucideIcon
 } from "lucide-react";
@@ -60,6 +68,7 @@ type CompilerChoiceDecision =
   | { kind: "msvc"; installationPath: string }
   | { kind: "mingw" }
   | { kind: "close" };
+type EditableToolId = "cmake" | "ninja" | "vcpkg" | "cxx";
 
 interface StatusToastState {
   message: string;
@@ -96,6 +105,27 @@ const viewItems: {
 ];
 
 const INSTALL_TOOL_ORDER: InstallToolKey[] = ["cmake", "ninja", "vcpkg", "cxx"];
+const EDITABLE_TOOL_IDS: EditableToolId[] = ["cmake", "ninja", "vcpkg", "cxx"];
+const EMPTY_BUILD_TYPE = "__none__";
+const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = [
+  { value: "vcpkg", label: "vcpkg" },
+  { value: "conan", label: "conan" },
+  { value: "none", label: "none" }
+];
+const toolModeOptions: { value: ToolInstallMode; label: string }[] = [
+  { value: "managed", label: "managed" },
+  { value: "system", label: "system" }
+];
+const compilerFamilyOptions: { value: CompilerPreference; label: string }[] = [
+  { value: "mingw", label: "MinGW" },
+  { value: "msvc", label: "MSVC" }
+];
+const toolLabels: Record<EditableToolId, string> = {
+  cmake: "CMake",
+  ninja: "Ninja",
+  vcpkg: "vcpkg",
+  cxx: "C++"
+};
 
 const INSTALL_TOOL_DONE_PATTERNS: Record<InstallToolKey, string[]> = {
   cmake: ["cmake 설치됨", "cmake 이미 설치됨"],
@@ -359,6 +389,97 @@ function toErrorMessage(error: unknown): string {
   return "알 수 없는 오류가 발생했습니다.";
 }
 
+function createDefaultToolPolicies(
+  compilerFamily: CompilerPreference = "mingw"
+): Required<ProjectToolPoliciesPayload> {
+  return {
+    cmake: { mode: "managed", version: "default" },
+    ninja: { mode: "managed", version: "default" },
+    vcpkg: { mode: "managed", version: "default" },
+    cxx:
+      compilerFamily === "msvc"
+        ? {
+            mode: "system",
+            version: "default",
+            preferredFamily: "msvc",
+            msvcInstallationPath: ""
+          }
+        : {
+            mode: "managed",
+            version: "latest",
+            preferredFamily: "mingw",
+            msvcInstallationPath: ""
+          }
+  };
+}
+
+function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPoliciesPayload> {
+  const compilerFamily =
+    config.tools?.cxx?.preferredFamily ??
+    config.compiler?.preferredFamily ??
+    "mingw";
+  const defaults = createDefaultToolPolicies(compilerFamily);
+
+  return {
+    cmake: {
+      mode: config.tools?.cmake?.mode ?? defaults.cmake.mode,
+      version: config.tools?.cmake?.version ?? defaults.cmake.version
+    },
+    ninja: {
+      mode: config.tools?.ninja?.mode ?? defaults.ninja.mode,
+      version: config.tools?.ninja?.version ?? defaults.ninja.version
+    },
+    vcpkg: {
+      mode: config.tools?.vcpkg?.mode ?? defaults.vcpkg.mode,
+      version: config.tools?.vcpkg?.version ?? defaults.vcpkg.version
+    },
+    cxx: {
+      mode: config.tools?.cxx?.mode ?? defaults.cxx.mode,
+      version: config.tools?.cxx?.version ?? defaults.cxx.version,
+      preferredFamily: compilerFamily,
+      msvcInstallationPath:
+        config.tools?.cxx?.msvcInstallationPath ??
+        config.compiler?.msvcInstallationPath ??
+        ""
+    }
+  };
+}
+
+function createNewPreset(index: number): PresetConfigPayload {
+  return {
+    name: `preset-${index + 1}`,
+    displayName: "",
+    buildType: undefined,
+    targetTriplet: "",
+    runnable: true
+  };
+}
+
+function getDependencyDescription(backend: DependencyBackend): string {
+  switch (backend) {
+    case "conan":
+      return "cppx add로 conan requires를 등록합니다";
+    case "none":
+      return "dependency_backend = none 에서는 cppx add를 지원하지 않습니다";
+    default:
+      return "cppx add로 vcpkg 패키지를 등록합니다";
+  }
+}
+
+function getToolStatusSummary(detail: ToolStatusDetail | undefined): string | null {
+  if (!detail?.ready) {
+    return null;
+  }
+
+  const parts = [
+    detail.mode,
+    detail.resolvedVersion ?? detail.requestedVersion,
+    detail.sourceKind
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function getInitButtonText(status: InitButtonStatus): string {
   switch (status) {
     case "running":
@@ -433,6 +554,15 @@ export default function App() {
   const [dependency, setDependency] = useState("");
   const [projectDependencies, setProjectDependencies] = useState<string[]>([]);
   const [preset, setPreset] = useState("debug-x64");
+  const [buildPreset, setBuildPreset] = useState("debug-x64");
+  const [dependencyBackend, setDependencyBackend] = useState<DependencyBackend>("vcpkg");
+  const [sourceFile, setSourceFile] = useState("src/main.cpp");
+  const [cxxStandardInput, setCxxStandardInput] = useState("20");
+  const [targetTriplet, setTargetTriplet] = useState("");
+  const [toolPolicies, setToolPolicies] = useState<Required<ProjectToolPoliciesPayload>>(
+    () => createDefaultToolPolicies()
+  );
+  const [presetConfigs, setPresetConfigs] = useState<PresetConfigPayload[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<RunCommandResult | null>(null);
@@ -478,6 +608,11 @@ export default function App() {
     ];
     return items.filter(Boolean).length;
   }, [toolStatus]);
+
+  const selectedPresetConfig = useMemo(
+    () => presetConfigs.find((item) => item.name === buildPreset),
+    [buildPreset, presetConfigs]
+  );
 
   function clearInitButtonResetTimer(): void {
     if (initButtonResetTimerRef.current) {
@@ -577,7 +712,7 @@ export default function App() {
 
     void cppx.getDefaultWorkspace().then((defaultWorkspace) => {
       setWorkspace(defaultWorkspace);
-      void refreshProjectDependencies(cppx, defaultWorkspace);
+      void refreshProjectConfig(cppx, defaultWorkspace);
     });
     void refreshToolStatus(cppx);
 
@@ -654,6 +789,20 @@ export default function App() {
     };
   }, [activeView, logs.length]);
 
+  useEffect(() => {
+    if (presetConfigs.length === 0) {
+      return;
+    }
+
+    if (!presetConfigs.some((item) => item.name === preset)) {
+      setPreset(presetConfigs[0]?.name ?? "");
+    }
+
+    if (!presetConfigs.some((item) => item.name === buildPreset)) {
+      setBuildPreset(presetConfigs.find((item) => item.name === preset)?.name ?? presetConfigs[0]?.name ?? "");
+    }
+  }, [buildPreset, preset, presetConfigs]);
+
   async function refreshToolStatus(api: CppxApi): Promise<void> {
     try {
       const current = await api.getToolStatus();
@@ -663,29 +812,56 @@ export default function App() {
     }
   }
 
-  async function refreshProjectDependencies(
+  function resetProjectEditor(): void {
+    setProjectName("");
+    setProjectDependencies([]);
+    setPreset("debug-x64");
+    setBuildPreset("debug-x64");
+    setDependencyBackend("vcpkg");
+    setSourceFile("src/main.cpp");
+    setCxxStandardInput("20");
+    setTargetTriplet("");
+    setToolPolicies(createDefaultToolPolicies());
+    setPresetConfigs([]);
+    setCmakeDefinitionsInput("");
+    setCmakeOptionsInput("");
+    setCmakeIncludesInput("");
+    setCmakeLinksInput("");
+  }
+
+  async function refreshProjectConfig(
     api: CppxApi,
     workspacePath: string
   ): Promise<void> {
     const path = workspacePath.trim();
     if (!path) {
-      setProjectDependencies([]);
+      resetProjectEditor();
       return;
     }
 
     try {
       const config = await api.getProjectConfig(path);
-      setProjectDependencies(config.dependencies);
-      setProjectName(config.name);
+      applyProjectConfig(config);
     } catch {
-      setProjectDependencies([]);
+      resetProjectEditor();
     }
   }
 
   function applyProjectConfig(config: ProjectConfigPayload): void {
     setProjectName(config.name);
     setPreset(config.defaultPreset);
+    setBuildPreset((current) =>
+      (config.presets ?? []).some((item) => item.name === current)
+        ? current
+        : config.defaultPreset
+    );
     setProjectDependencies(config.dependencies);
+    setDependencyBackend(config.dependencyBackend ?? "vcpkg");
+    setSourceFile(config.sourceFile);
+    setCxxStandardInput(String(config.cxxStandard));
+    setTargetTriplet(config.targetTriplet);
+    setToolPolicies(toToolPolicyState(config));
+    setPresetConfigs(config.presets ?? []);
     setCmakeDefinitionsInput(toListInput(config.cmake.compileDefinitions));
     setCmakeOptionsInput(toListInput(config.cmake.compileOptions));
     setCmakeIncludesInput(toListInput(config.cmake.includeDirectories));
@@ -731,10 +907,54 @@ export default function App() {
 
     try {
       const current = await cppx.getProjectConfig(workspace);
+      const parsedCxxStandard = Number.parseInt(cxxStandardInput.trim(), 10);
       const updated: ProjectConfigPayload = {
         ...current,
         name: projectName.trim() || current.name,
         defaultPreset: preset.trim() || current.defaultPreset,
+        sourceFile: sourceFile.trim() || current.sourceFile,
+        cxxStandard:
+          Number.isFinite(parsedCxxStandard) && parsedCxxStandard > 0
+            ? parsedCxxStandard
+            : current.cxxStandard,
+        targetTriplet: targetTriplet.trim() || current.targetTriplet,
+        dependencyBackend,
+        compiler: {
+          preferredFamily: toolPolicies.cxx.preferredFamily,
+          ...(toolPolicies.cxx.msvcInstallationPath?.trim()
+            ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+            : {})
+        },
+        tools: {
+          cmake: {
+            mode: toolPolicies.cmake.mode,
+            version: toolPolicies.cmake.version?.trim() || current.tools?.cmake?.version || "default"
+          },
+          ninja: {
+            mode: toolPolicies.ninja.mode,
+            version: toolPolicies.ninja.version?.trim() || current.tools?.ninja?.version || "default"
+          },
+          vcpkg: {
+            mode: toolPolicies.vcpkg.mode,
+            version: toolPolicies.vcpkg.version?.trim() || current.tools?.vcpkg?.version || "default"
+          },
+          cxx: {
+            mode: toolPolicies.cxx.mode,
+            version: toolPolicies.cxx.version?.trim() || current.tools?.cxx?.version || "latest",
+            preferredFamily: toolPolicies.cxx.preferredFamily,
+            ...(toolPolicies.cxx.msvcInstallationPath?.trim()
+              ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+              : {})
+          }
+        },
+        presets: presetConfigs.map((presetConfig, index) => ({
+          ...presetConfig,
+          name: presetConfig.name.trim() || `preset-${index + 1}`,
+          displayName: presetConfig.displayName?.trim() || undefined,
+          buildType: presetConfig.buildType?.trim() || undefined,
+          targetTriplet: presetConfig.targetTriplet?.trim() || undefined,
+          runnable: presetConfig.runnable ?? true
+        })),
         cmake: {
           ...current.cmake,
           compileDefinitions: fromListInput(cmakeDefinitionsInput),
@@ -752,6 +972,58 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function updateToolPolicy(
+    tool: EditableToolId,
+    field: "mode" | "version" | "preferredFamily" | "msvcInstallationPath",
+    value: string
+  ): void {
+    setToolPolicies((prev) => ({
+      ...prev,
+      [tool]: {
+        ...prev[tool],
+        [field]: value
+      }
+    }));
+  }
+
+  function updatePresetConfig(
+    index: number,
+    field: keyof PresetConfigPayload,
+    value: string | boolean
+  ): void {
+    setPresetConfigs((prev) =>
+      prev.map((item, currentIndex) => {
+        if (currentIndex !== index) {
+          return item;
+        }
+
+        return {
+          ...item,
+          [field]:
+            field === "runnable"
+              ? Boolean(value)
+              : field !== "name" && typeof value === "string" && value.length === 0
+                ? undefined
+                : value
+        };
+      })
+    );
+  }
+
+  function addPresetConfig(): void {
+    setPresetConfigs((prev) => {
+      const next = [...prev, createNewPreset(prev.length)];
+      if (next.length === 1) {
+        setPreset(next[0]?.name ?? "");
+      }
+      return next;
+    });
+  }
+
+  function removePresetConfig(index: number): void {
+    setPresetConfigs((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   }
 
   async function runAction(action: CppxAction): Promise<void> {
@@ -773,34 +1045,44 @@ export default function App() {
 
     let compilerPreference: RunCommandPayload["compilerPreference"];
     let msvcInstallationPath: RunCommandPayload["msvcInstallationPath"];
+    let payloadToolPolicies: RunCommandPayload["toolPolicies"];
+    let payloadDependencyBackend: RunCommandPayload["dependencyBackend"];
     if (action === "install-tools") {
-      try {
-        const scan = await cppx.getCompilerScan();
-        if (scan.msvcAvailable) {
-          const choice = await requestCompilerChoiceDialog(scan);
-          if (choice.kind === "close") {
-            showStatusToast("도구 설치를 취소했습니다.", "info");
-            return;
+      compilerPreference = toolPolicies.cxx.preferredFamily;
+      msvcInstallationPath = toolPolicies.cxx.msvcInstallationPath?.trim() || undefined;
+
+      if (compilerPreference === "msvc") {
+        try {
+          const scan = await cppx.getCompilerScan();
+          if (scan.msvcAvailable && !msvcInstallationPath) {
+            const choice = await requestCompilerChoiceDialog(scan);
+            if (choice.kind === "close") {
+              showStatusToast("도구 설치를 취소했습니다.", "info");
+              return;
+            }
+            if (choice.kind === "msvc") {
+              msvcInstallationPath = choice.installationPath;
+            } else {
+              compilerPreference = "mingw";
+              msvcInstallationPath = undefined;
+            }
           }
-          if (choice.kind === "msvc") {
-            compilerPreference = "msvc";
-            msvcInstallationPath = choice.installationPath;
-          } else {
-            compilerPreference = "mingw";
-          }
-          showStatusToast(
-            compilerPreference === "msvc"
-              ? "MSVC 기준으로 도구 설치를 진행합니다."
-              : "MinGW 기준으로 도구 설치를 진행합니다.",
-            "info"
-          );
-        } else {
-          compilerPreference = "mingw";
-          showStatusToast("MSVC가 감지되지 않아 MinGW 설치를 진행합니다.", "info");
+        } catch {
+          // Keep the selected tool policy and let the backend return the concrete error.
         }
-      } catch {
-        compilerPreference = "mingw";
       }
+
+      showStatusToast(
+        compilerPreference === "msvc"
+          ? "MSVC 기준으로 도구 설치를 진행합니다."
+          : "MinGW 기준으로 도구 설치를 진행합니다.",
+        "info"
+      );
+    }
+
+    if (action === "install-tools" || action === "init") {
+      payloadToolPolicies = toToolPoliciesPayload(toolPolicies);
+      payloadDependencyBackend = dependencyBackend;
     }
 
     const payload: RunCommandPayload = {
@@ -808,9 +1090,11 @@ export default function App() {
       workspace,
       projectName,
       dependency,
-      preset,
+      preset: buildPreset,
+      dependencyBackend: payloadDependencyBackend,
       compilerPreference,
-      msvcInstallationPath
+      msvcInstallationPath,
+      toolPolicies: payloadToolPolicies
     };
 
     setBusy(true);
@@ -842,11 +1126,11 @@ export default function App() {
 
       if (action === "init" && result.ok && result.workspace) {
         setWorkspace(result.workspace);
-        await refreshProjectDependencies(cppx, result.workspace);
+        await refreshProjectConfig(cppx, result.workspace);
       }
 
       if (action === "add" && result.ok) {
-        await refreshProjectDependencies(cppx, workspace);
+        await refreshProjectConfig(cppx, workspace);
       }
 
       if (action === "init") {
@@ -919,7 +1203,7 @@ export default function App() {
     if (selected) {
       setWorkspace(selected);
       setConfigNotice(null);
-      void refreshProjectDependencies(cppx, selected);
+      void refreshProjectConfig(cppx, selected);
     }
   }
 
@@ -931,8 +1215,11 @@ export default function App() {
           <div className="space-y-2">
             <Badge className="uppercase tracking-[0.08em]">cppx</Badge>
             <h1 className="text-[clamp(1.5rem,0.95vw+1.1rem,2rem)] font-bold tracking-tight">
-              Windows용 Cargo 스타일 C++ 워크플로
+              Cargo 스타일 C++ 워크플로 제어판
             </h1>
+            <p className="text-sm text-muted-foreground">
+              Windows, macOS, Linux 호스트와 `vcpkg` / `conan` / `none` 구성을 한 화면에서 맞춥니다.
+            </p>
             <p className="break-all text-xs text-muted-foreground">
               루트 폴더: <code className="font-mono">{defaultRootPath || "불러오는 중..."}</code>
             </p>
@@ -942,7 +1229,7 @@ export default function App() {
           </div>
         </div>
         <Separator className="my-4" />
-        <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground md:grid-cols-3">
           <p
             className="truncate rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2"
             title={workspace || "작업 폴더 미지정"}
@@ -951,6 +1238,9 @@ export default function App() {
           </p>
           <p className="rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2">
             기본 프리셋: <span className="font-mono">{preset}</span>
+          </p>
+          <p className="rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2">
+            의존성 백엔드: <span className="font-mono">{dependencyBackend}</span>
           </p>
         </div>
 
@@ -1022,7 +1312,7 @@ export default function App() {
                   <CardHeader>
                     <CardTitle>프로젝트 생성/초기화</CardTitle>
                     <CardDescription>
-                      CMakePresets, vcpkg.json, VSCode tasks/launch 템플릿 생성
+                      CMakePresets, backend manifest, VSCode tasks/launch 템플릿 생성
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1043,6 +1333,175 @@ export default function App() {
                       <Wrench className={`h-4 w-4 ${initButtonStatus === "running" ? "animate-spin" : ""}`} />
                       {getInitButtonText(initButtonStatus)}
                     </Button>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid min-w-0 gap-3 xl:grid-cols-2">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle>프로젝트 / 백엔드 설정</CardTitle>
+                    <CardDescription>
+                      schema v2 기준의 핵심 프로젝트 설정을 읽고 저장합니다
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs" htmlFor="source-file">source_file</Label>
+                        <Input
+                          id="source-file"
+                          value={sourceFile}
+                          onChange={(event) => setSourceFile(event.target.value)}
+                          placeholder="src/main.cpp"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs" htmlFor="cxx-standard">cxx_standard</Label>
+                        <Input
+                          id="cxx-standard"
+                          value={cxxStandardInput}
+                          onChange={(event) => setCxxStandardInput(event.target.value)}
+                          placeholder="20"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">dependency_backend</Label>
+                        <Select value={dependencyBackend} onValueChange={(value) => setDependencyBackend(value as DependencyBackend)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="백엔드 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {dependencyBackendOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">default_preset</Label>
+                        {presetConfigs.length > 0 ? (
+                          <Select value={preset} onValueChange={setPreset}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="기본 프리셋 선택" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {presetConfigs.map((item, index) => (
+                                <SelectItem key={`${item.name}-${index}`} value={item.name}>
+                                  {item.displayName?.trim() || item.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
+                            아직 프리셋이 없습니다. 저장 시 기본 프리셋이 다시 생성됩니다.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs" htmlFor="target-triplet">target_triplet (기본값)</Label>
+                      <Input
+                        id="target-triplet"
+                        value={targetTriplet}
+                        onChange={(event) => setTargetTriplet(event.target.value)}
+                        placeholder="x64-mingw-dynamic / x64-windows / x64-osx / x64-linux"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle>도구 정책</CardTitle>
+                    <CardDescription>
+                      managed / system 모드와 버전 정책을 GUI에서 직접 조정합니다
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {EDITABLE_TOOL_IDS.map((tool) => (
+                      <div
+                        key={tool}
+                        className="space-y-2 rounded-[10px] border border-border/70 bg-secondary/35 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Label className="text-sm font-medium">{toolLabels[tool]}</Label>
+                          <span className="text-[11px] text-muted-foreground">
+                            {getToolStatusSummary(toolStatus.details?.[tool]) ?? "미확인"}
+                          </span>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">mode</Label>
+                            <Select
+                              value={toolPolicies[tool].mode ?? "managed"}
+                              onValueChange={(value) =>
+                                updateToolPolicy(tool, "mode", value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="mode 선택" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {toolModeOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">version</Label>
+                            <Input
+                              value={toolPolicies[tool].version ?? ""}
+                              onChange={(event) =>
+                                updateToolPolicy(tool, "version", event.target.value)
+                              }
+                              placeholder={tool === "cxx" ? "latest / default" : "default / latest / exact"}
+                            />
+                          </div>
+                        </div>
+                        {tool === "cxx" && (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">preferred_family</Label>
+                              <Select
+                                value={toolPolicies.cxx.preferredFamily ?? "mingw"}
+                                onValueChange={(value) =>
+                                  updateToolPolicy("cxx", "preferredFamily", value)
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="컴파일러 선택" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {compilerFamilyOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs" htmlFor="msvc-path">msvc_installation_path</Label>
+                              <Input
+                                id="msvc-path"
+                                value={toolPolicies.cxx.msvcInstallationPath ?? ""}
+                                onChange={(event) =>
+                                  updateToolPolicy("cxx", "msvcInstallationPath", event.target.value)
+                                }
+                                placeholder="MSVC 사용 시 선택 경로를 저장"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </CardContent>
                 </Card>
               </div>
@@ -1120,26 +1579,26 @@ export default function App() {
                 <Card>
                   <CardHeader>
                     <CardTitle>의존성 추가</CardTitle>
-                    <CardDescription>cppx add로 vcpkg.json 패키지를 등록합니다</CardDescription>
+                    <CardDescription>{getDependencyDescription(dependencyBackend)}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="dependency-name">패키지 이름</Label>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        id="dependency-name"
-                        value={dependency}
-                        onChange={(event) => setDependency(event.target.value)}
-                        placeholder="fmt or boost-asio"
-                        className="sm:min-w-0 sm:flex-1"
-                      />
-                      <Button
-                        onClick={() => void runAction("add")}
-                        disabled={busy}
-                        className="sm:min-w-24 sm:shrink-0"
-                      >
-                        Add
-                      </Button>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                          id="dependency-name"
+                          value={dependency}
+                          onChange={(event) => setDependency(event.target.value)}
+                          placeholder="fmt or boost-asio"
+                          className="sm:min-w-0 sm:flex-1"
+                        />
+                        <Button
+                          onClick={() => void runAction("add")}
+                          disabled={busy || dependencyBackend === "none"}
+                          className="sm:min-w-24 sm:shrink-0"
+                        >
+                          Add
+                        </Button>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1148,7 +1607,7 @@ export default function App() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => cppx && void refreshProjectDependencies(cppx, workspace)}
+                          onClick={() => cppx && void refreshProjectConfig(cppx, workspace)}
                           disabled={busy || !cppx || !workspace.trim()}
                         >
                           목록 새로고침
@@ -1175,6 +1634,149 @@ export default function App() {
                   </CardContent>
                 </Card>
               </div>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle>프리셋 매트릭스</CardTitle>
+                  <CardDescription>
+                    data-driven preset 목록과 실행 가능 여부를 GUI에서 편집합니다
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="secondary"
+                      onClick={addPresetConfig}
+                      disabled={busy}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      프리셋 추가
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void loadProjectConfig()}
+                      disabled={busy}
+                    >
+                      프리셋 다시 불러오기
+                    </Button>
+                  </div>
+                  {presetConfigs.length === 0 ? (
+                    <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
+                      현재 로드된 프리셋이 없습니다. config를 저장하면 기본 프리셋이 다시 생성됩니다.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {presetConfigs.map((presetConfig, index) => (
+                        <div
+                          key={`${presetConfig.name}-${index}`}
+                          className="space-y-3 rounded-[10px] border border-border/70 bg-secondary/35 p-3"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">
+                                {presetConfig.displayName?.trim() || presetConfig.name || `preset-${index + 1}`}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                기본 선택 여부: {preset === presetConfig.name ? "예" : "아니오"}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => removePresetConfig(index)}
+                              disabled={busy}
+                              className="gap-2"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              삭제
+                            </Button>
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">name</Label>
+                              <Input
+                                value={presetConfig.name}
+                                onChange={(event) =>
+                                  updatePresetConfig(index, "name", event.target.value)
+                                }
+                                placeholder={`preset-${index + 1}`}
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">display_name</Label>
+                              <Input
+                                value={presetConfig.displayName ?? ""}
+                                onChange={(event) =>
+                                  updatePresetConfig(index, "displayName", event.target.value)
+                                }
+                                placeholder="Debug x64"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">build_type</Label>
+                              <Select
+                                value={presetConfig.buildType ?? EMPTY_BUILD_TYPE}
+                                onValueChange={(value) =>
+                                  updatePresetConfig(
+                                    index,
+                                    "buildType",
+                                    value === EMPTY_BUILD_TYPE ? "" : value
+                                  )
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="build type 선택" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={EMPTY_BUILD_TYPE}>지정 안 함</SelectItem>
+                                  <SelectItem value="Debug">Debug</SelectItem>
+                                  <SelectItem value="Release">Release</SelectItem>
+                                  <SelectItem value="RelWithDebInfo">RelWithDebInfo</SelectItem>
+                                  <SelectItem value="MinSizeRel">MinSizeRel</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">target_triplet</Label>
+                              <Input
+                                value={presetConfig.targetTriplet ?? ""}
+                                onChange={(event) =>
+                                  updatePresetConfig(index, "targetTriplet", event.target.value)
+                                }
+                                placeholder="비우면 상위 target_triplet 사용"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">runnable</Label>
+                              <Select
+                                value={presetConfig.runnable === false ? "false" : "true"}
+                                onValueChange={(value) =>
+                                  updatePresetConfig(index, "runnable", value === "true")
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="실행 가능 여부" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="true">true</SelectItem>
+                                  <SelectItem value="false">false</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">default target</Label>
+                              <p className="rounded-[10px] border border-border/70 bg-card px-3 py-2 text-xs text-muted-foreground">
+                                상위 설정: <span className="font-mono">{targetTriplet || "(비어 있음)"}</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </section>
           )}
 
@@ -1184,30 +1786,52 @@ export default function App() {
                 <CardHeader>
                   <CardTitle>Build / Run / Test / Pack</CardTitle>
                   <CardDescription>
-                    빌드 명령 예시: <code className="font-mono">cppx build --preset debug-x64</code>
+                    빌드 명령 예시: <code className="font-mono">cppx build --preset {buildPreset || "(preset)"}</code>
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label>프리셋</Label>
-                    <Select
-                      value={preset}
-                      onValueChange={setPreset}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="프리셋 선택" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="debug-x64">debug-x64</SelectItem>
-                        <SelectItem value="release-x64">release-x64</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {presetConfigs.length > 0 ? (
+                      <Select
+                        value={buildPreset}
+                        onValueChange={setBuildPreset}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="프리셋 선택" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {presetConfigs.map((item, index) => (
+                            <SelectItem key={`${item.name}-${index}`} value={item.name}>
+                              {item.displayName?.trim() || item.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
+                        먼저 config를 불러오거나 저장해서 프리셋 목록을 동기화하세요.
+                      </p>
+                    )}
+                    {selectedPresetConfig && (
+                      <p className="text-xs text-muted-foreground">
+                        target_triplet:{" "}
+                        <span className="font-mono">
+                          {selectedPresetConfig.targetTriplet?.trim() || targetTriplet || "(기본값 자동 결정)"}
+                        </span>
+                        {" · "}
+                        runnable:{" "}
+                        <span className="font-mono">
+                          {selectedPresetConfig.runnable === false ? "false" : "true"}
+                        </span>
+                      </p>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       variant="secondary"
                       onClick={() => void runAction("run")}
-                      disabled={busy}
+                      disabled={busy || presetConfigs.length === 0 || selectedPresetConfig?.runnable === false}
                       className="gap-2"
                     >
                       <Play className="h-4 w-4" />
@@ -1215,7 +1839,7 @@ export default function App() {
                     </Button>
                     <Button
                       onClick={() => void runAction("build")}
-                      disabled={busy}
+                      disabled={busy || presetConfigs.length === 0}
                       className="gap-2"
                     >
                       <Hammer className="h-4 w-4" />
@@ -1224,14 +1848,14 @@ export default function App() {
                     <Button
                       variant="outline"
                       onClick={() => void runAction("test")}
-                      disabled={busy}
+                      disabled={busy || presetConfigs.length === 0}
                     >
                       Test
                     </Button>
                     <Button
                       variant="outline"
                       onClick={() => void runAction("pack")}
-                      disabled={busy}
+                      disabled={busy || presetConfigs.length === 0}
                     >
                       Pack
                     </Button>
@@ -1251,24 +1875,28 @@ export default function App() {
                     <ToolStatusRow
                       name="CMake"
                       ready={toolStatus.cmake}
+                      detail={toolStatus.details?.cmake}
                       progress={installProgress.tools.cmake}
                       showProgress={installProgress.status !== "idle"}
                     />
                     <ToolStatusRow
                       name="Ninja"
                       ready={toolStatus.ninja}
+                      detail={toolStatus.details?.ninja}
                       progress={installProgress.tools.ninja}
                       showProgress={installProgress.status !== "idle"}
                     />
                     <ToolStatusRow
                       name="vcpkg"
                       ready={toolStatus.vcpkg}
+                      detail={toolStatus.details?.vcpkg}
                       progress={installProgress.tools.vcpkg}
                       showProgress={installProgress.status !== "idle"}
                     />
                     <ToolStatusRow
                       name="C++ 컴파일러"
                       ready={toolStatus.cxx}
+                      detail={toolStatus.details?.cxx}
                       progress={installProgress.tools.cxx}
                       showProgress={installProgress.status !== "idle"}
                     />
@@ -1469,27 +2097,37 @@ function getInstallToolProgressBarClass(status: InstallProgressStatus): string {
 function ToolStatusRow({
   name,
   ready,
+  detail,
   progress,
   showProgress = false
 }: {
   name: string;
   ready: boolean;
+  detail?: ToolStatusDetail;
   progress?: InstallToolProgress;
   showProgress?: boolean;
 }) {
   const percent = progress
     ? Math.max(0, Math.min(100, Math.trunc(progress.percent)))
     : 0;
+  const summary = getToolStatusSummary(detail);
 
   return (
     <div className="flex items-center gap-2 rounded-[10px] border border-border/70 bg-secondary/35 px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        {ready ? (
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-        ) : (
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          {ready ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+          ) : (
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          )}
+          <span className="truncate text-sm font-medium">{name}</span>
+        </div>
+        {summary && (
+          <p className="truncate pl-6 text-[11px] text-muted-foreground" title={summary}>
+            {summary}
+          </p>
         )}
-        <span className="truncate text-sm font-medium">{name}</span>
       </div>
       {showProgress && progress && (
         <div className="mx-1 flex min-w-0 flex-1 items-center gap-2">
