@@ -150,7 +150,7 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기` / `config 저장` 
 - 이제 설정의 중심은 `.cppx/config.toml`입니다. `.cppx/CMakeLists.txt`, `.cppx/CMakePresets.json`, backend manifest, `.vscode/tasks.json`, `.vscode/launch.json`은 모두 생성물로 취급하는 것이 맞습니다
 - 고정된 `debug/release` 쌍만 쓰던 프로젝트도 계속 동작하지만, 이제는 `[[presets]]`와 `default_preset`으로 프리셋 매트릭스를 직접 선언할 수 있습니다
 - 의존성 방식은 `dependency_backend = "vcpkg" | "conan" | "none"`로 선택하고, 도구 설치 방식은 `[tools.*]`의 `managed/system` 정책으로 제어합니다
-- 자세한 전환 절차는 [docs/guide/migration.md](C:/Users/Administrator/Desktop/repo/cppx/docs/guide/migration.md)에 정리했습니다
+- 자세한 전환 절차는 [docs/guide/migration.md](docs/guide/migration.md)에 정리했습니다
 
 ## 프로젝트 구조
 

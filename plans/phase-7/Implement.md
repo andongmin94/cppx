@@ -57,8 +57,8 @@ Stop and repair before continuing when:
 
 ## Work log
 
-- [ ] M1 complete
-- [ ] M2 complete
+- [x] M1 complete
+- [x] M2 complete
 - [ ] M3 complete
 
 ## Notes

@@ -50,6 +50,6 @@ Stop before continuing when:
 
 ## Milestone work log
 
-- [ ] M1 complete
-- [ ] M2 complete
+- [x] M1 complete
+- [x] M2 complete
 - [ ] M3 complete
