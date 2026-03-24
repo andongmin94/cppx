@@ -30,6 +30,11 @@ function createLogger(): CppxLogger {
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
+  const usesManagedBuildTools = process.platform === "win32";
+  const toolPolicy =
+    usesManagedBuildTools
+      ? { mode: "managed" as const, version: "default" }
+      : { mode: "system" as const, version: "latest" };
   const cxxPolicy =
     process.platform === "win32"
       ? { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
@@ -39,9 +44,9 @@ async function main(): Promise<void> {
     const toolchain = await resolveToolchainOrThrow(
       logger,
       {
-        cmake: { mode: "system", version: "latest" },
-        ninja: { mode: "system", version: "latest" },
-        vcpkg: { mode: "system", version: "latest" },
+        cmake: toolPolicy,
+        ninja: toolPolicy,
+        vcpkg: toolPolicy,
         cxx: cxxPolicy
       },
       "none"
@@ -54,9 +59,9 @@ async function main(): Promise<void> {
       ...current,
       dependencyBackend: "none",
       tools: {
-        cmake: { mode: "system", version: "latest" },
-        ninja: { mode: "system", version: "latest" },
-        vcpkg: { mode: "system", version: "latest" },
+        cmake: toolPolicy,
+        ninja: toolPolicy,
+        vcpkg: toolPolicy,
         cxx: cxxPolicy
       }
     });

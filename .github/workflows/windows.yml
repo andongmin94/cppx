@@ -57,8 +57,12 @@ jobs:
       - name: Test
         run: npm run test:ci
 
+      - name: Prepare Windows native smoke
+        if: runner.os == 'Windows'
+        run: npm run cppx -- install-tools --compiler msvc
+
       - name: Native smoke
-        run: npm run smoke:native
+        run: npm run smoke:ci
 
       - name: Windows managed smoke
         if: runner.os == 'Windows'
