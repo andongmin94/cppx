@@ -1457,7 +1457,9 @@ export async function resolveToolchainOrThrow(
   const [cmake, ninja, vcpkg, cxxResolved] = await Promise.all([
     resolveToolExecutable("cmake", manifest, policies.cmake),
     resolveToolExecutable("ninja", manifest, policies.ninja),
-    resolveToolExecutable("vcpkg", manifest, policies.vcpkg),
+    dependencyBackend === "vcpkg"
+      ? resolveToolExecutable("vcpkg", manifest, policies.vcpkg)
+      : Promise.resolve(null),
     resolveToolExecutable("cxx", manifest, policies.cxx)
   ]);
 

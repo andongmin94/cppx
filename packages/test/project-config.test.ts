@@ -60,6 +60,7 @@ test("saveProjectConfig writes normalized config and addDependency avoids duplic
       const current = await loadProjectConfig(workspace);
       const saved = await saveProjectConfig(workspace, {
         ...current,
+        dependencyBackend: "vcpkg",
         dependencies: ["fmt"],
         cmake: {
           ...current.cmake,
