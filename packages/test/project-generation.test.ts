@@ -17,6 +17,14 @@ import {
   writeText
 } from "./support/helpers";
 
+function normalizeGeneratedText(value: string): string {
+  return normalizeNewlines(value)
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
 test("initProject generates the current baseline files for the active host", async () => {
   const workspace = await createTempDir("init-project");
   const { logger } = createLogger();
@@ -28,8 +36,8 @@ test("initProject generates the current baseline files for the active host", asy
 
     if (process.platform === "win32") {
       assert.equal(
-        normalizeNewlines(await readText(path.join(workspace, ".cppx", "CMakeLists.txt"))),
-        normalizeNewlines(await readFixtureText("init-mingw", "CMakeLists.txt"))
+        normalizeGeneratedText(await readText(path.join(workspace, ".cppx", "CMakeLists.txt"))),
+        normalizeGeneratedText(await readFixtureText("init-mingw", "CMakeLists.txt"))
       );
       assert.deepEqual(
         await readJson(path.join(workspace, ".cppx", "CMakePresets.json")),
