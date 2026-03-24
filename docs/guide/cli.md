@@ -1,131 +1,145 @@
 # CLI 사용법
 
-cppx CLI는 Cargo의 워크플로를 C++에 맞게 재현한 명령어 체계입니다. 프로젝트 초기화부터 빌드, 실행, 테스트, 패키징까지 일관된 인터페이스로 처리합니다.
+cppx CLI는 C++ 프로젝트를 `init -> add -> build -> run -> test -> pack` 흐름으로 다루기 위한 인터페이스입니다.
 
-## 명령어 실행 방법
-
-cppx CLI는 프로젝트 내부에서 다음과 같이 실행합니다.
+## 실행 형식
 
 ```bash
+cd packages
 npm run cppx -- <command> [options]
 ```
 
-## 명령어 목록
+## 명령어
 
-### `install-tools` — 도구 설치
+### `install-tools`
 
-CMake, Ninja, vcpkg, C++ 컴파일러를 `%LOCALAPPDATA%/cppx/` 하위에 설치합니다.
+CMake, Ninja, vcpkg, C++ 컴파일러를 준비합니다.
 
 ```bash
 npm run cppx -- install-tools
+npm run cppx -- install-tools --compiler mingw
+npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
 ```
 
-자세한 내용은 [도구 설치](./install.md) 페이지를 참고해 주세요.
+옵션:
 
----
+| 옵션 | 설명 |
+|---|---|
+| `--compiler <mingw|msvc>` | 컴파일러 계열 선택 |
+| `--msvc-installation-path <path>` | 특정 MSVC 설치 경로를 우선 사용 |
 
-### `init` — 프로젝트 초기화
+Windows에서는 관리형 도구를 설치하거나 MSVC를 system 모드로 등록합니다. macOS/Linux에서는 기본적으로 system 정책에 따라 `cmake`, `ninja`, C++ 컴파일러를 확인하고 manifest를 갱신합니다.
 
-새로운 C++ 프로젝트를 생성합니다. `config.toml`, `src/main.cpp`, CMake 관련 파일, VSCode 설정까지 한 번에 만들어집니다.
+`install-tools`는 현재 `conan` 자체를 설치하지 않습니다. `dependency_backend = "conan"`을 사용할 때는 `conan` 명령을 시스템에 별도로 준비해야 합니다.
+
+### `init [workspace]`
+
+프로젝트를 초기화합니다.
 
 ```bash
-npm run cppx -- init C:\dev\myapp --name myapp
+npm run cppx -- init ./myapp --name myapp
 ```
 
-| 옵션 | 설명 | 기본값 |
-|------|------|--------|
-| `-n, --name` | 프로젝트 이름 | 폴더명 |
+옵션:
 
-생성되는 파일 목록은 [시작하기](./index.md#2단계-프로젝트-초기화) 페이지에서 확인할 수 있습니다.
+| 옵션 | 설명 |
+|---|---|
+| `-n, --name <name>` | 프로젝트 이름 |
 
----
+### `add <dependency> [workspace]`
 
-### `add` — 의존성 추가
-
-vcpkg 패키지를 프로젝트의 `.cppx/config.toml`에 추가합니다.
+의존성을 `.cppx/config.toml`에 추가합니다.
 
 ```bash
-npm run cppx -- add fmt C:\dev\myapp
-npm run cppx -- add boost-asio C:\dev\myapp
+npm run cppx -- add fmt ./myapp
 ```
 
-추가된 패키지는 다음 빌드 시 vcpkg를 통해 자동으로 설치됩니다.
+백엔드별 동작:
 
----
+- `vcpkg`: 패키지 이름을 목록에 추가하고 다음 sync 때 `.cppx/vcpkg.json`에 반영합니다.
+- `conan`: 패키지 이름을 목록에 추가하고 다음 sync 때 `.cppx/conanfile.txt`에 반영합니다.
+- `none`: 명령이 실패하며 사용자가 직접 의존성을 관리해야 합니다.
 
-### `build` — 빌드
+### `build [workspace]`
 
-CMake configure와 build를 프리셋 기반으로 수행합니다.
+프리셋 기준으로 configure + build를 수행합니다.
 
 ```bash
-npm run cppx -- build C:\dev\myapp
-npm run cppx -- build C:\dev\myapp --preset release-x64
+npm run cppx -- build ./myapp
+npm run cppx -- build ./myapp --preset release-x64
 ```
 
-| 옵션 | 설명 | 기본값 |
-|------|------|--------|
-| `-p, --preset` | 빌드 프리셋 | `debug-x64` |
+옵션:
 
-빌드 전에 `config.toml`을 기준으로 `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`이 자동으로 재생성됩니다.
+| 옵션 | 설명 |
+|---|---|
+| `-p, --preset <preset>` | 프리셋 이름 |
 
----
+`--preset`을 생략하면 `.cppx/config.toml`의 `default_preset`을 사용합니다.
 
-### `run` — 빌드 & 실행
+### `run [workspace]`
 
-빌드를 먼저 수행한 뒤 생성된 바이너리를 실행합니다. Cargo의 `cargo run`과 동일한 흐름입니다.
+먼저 빌드한 뒤 실행 파일을 실행합니다.
 
 ```bash
-npm run cppx -- run C:\dev\myapp
-npm run cppx -- run C:\dev\myapp --preset release-x64
+npm run cppx -- run ./myapp
+npm run cppx -- run ./myapp --preset asan-x64
 ```
 
-바이너리 경로는 `build/<preset>/<project-name>.exe`입니다.
+`runnable = false`로 표시된 프리셋은 build 전에 바로 거부됩니다.
 
----
+### `test [workspace]`
 
-### `test` — 테스트
-
-CTest를 프리셋 기반으로 실행합니다. 실패한 테스트가 있으면 출력 내용을 함께 보여줍니다.
+CTest 프리셋을 실행합니다.
 
 ```bash
-npm run cppx -- test C:\dev\myapp
-npm run cppx -- test C:\dev\myapp --preset release-x64
+npm run cppx -- test ./myapp
+npm run cppx -- test ./myapp --preset release-x64
 ```
 
----
+### `pack [workspace]`
 
-### `pack` — 패키징
-
-CPack을 프리셋 기반으로 실행하여 ZIP 형태의 배포 패키지를 생성합니다.
+CPack 프리셋을 실행합니다.
 
 ```bash
-npm run cppx -- pack C:\dev\myapp
-npm run cppx -- pack C:\dev\myapp --preset release-x64
+npm run cppx -- pack ./myapp
+npm run cppx -- pack ./myapp --preset release-x64
 ```
 
----
+### `status`
 
-### `status` — 도구 상태 확인
-
-설치된 도구(cmake, ninja, vcpkg, cxx)의 상태를 확인합니다.
+도구 설치 상태를 확인합니다.
 
 ```bash
 npm run cppx -- status
 ```
 
-각 도구에 대해 `ready` 또는 `missing`으로 표시됩니다.
+가능하면 다음 정보도 함께 표시합니다.
 
-## 프리셋
+- 설치 모드: `managed` 또는 `system`
+- 해석된 버전
+- 소스 종류: `catalog-archive`, `catalog-git`, `catalog-github-release`, `system-detected`, `msvc-detected`
+- 실행 파일 경로
 
-cppx는 두 가지 빌드 프리셋을 기본 제공합니다.
+예시:
 
-| 프리셋 | 용도 | 최적화 |
-|--------|------|--------|
-| `debug-x64` | 개발·디버깅용 | 최적화 없음, 디버그 정보 포함 |
-| `release-x64` | 배포용 | 최적화 활성, 디버그 정보 제거 |
+```text
+cmake: ready (system, 3.30.5, system-detected, /usr/bin/cmake)
+```
 
-`--preset` 옵션을 생략하면 `config.toml`의 `default_preset` 값이 사용되며, 기본값은 `debug-x64`입니다.
+## 프리셋 동작
 
-::: tip build → run → test → pack의 자연스러운 흐름
-Cargo처럼 `run`은 자동으로 `build`를 포함하므로, 개발 중에는 `run` 하나로 빌드와 실행을 동시에 처리할 수 있습니다.
-:::
+프리셋은 항상 설정 파일의 `[[presets]]`에서 읽습니다.
+
+- configure, build, test, package 프리셋이 같은 이름으로 함께 생성됩니다.
+- VSCode tasks도 같은 프리셋 목록을 기준으로 생성됩니다.
+- `runnable = false`인 프리셋은 launch 설정과 run task에서 제외됩니다.
+- 프리셋을 선언하지 않으면 기본적으로 `debug-<host-arch>`, `release-<host-arch>`를 사용합니다.
+
+## 백엔드 동작
+
+- `vcpkg`: `.cppx/vcpkg.json` 생성, vcpkg toolchain 사용
+- `conan`: `.cppx/conanfile.txt` 생성, configure 전에 `conan install` 실행
+- `none`: backend manifest 없음, `cppx add` 비활성화
+
+새 프로젝트를 `init`으로 만들 때 기본 backend는 Windows에서 `vcpkg`, macOS/Linux에서 `none`입니다.

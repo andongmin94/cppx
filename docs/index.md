@@ -2,12 +2,12 @@
 layout: home
 
 title: cppx
-titleTemplate: Windows용 Cargo 스타일 C++ 워크플로
+titleTemplate: 크로스플랫폼 Cargo 스타일 C++ 워크플로
 
 hero:
   name: cppx
   text: Cargo 스타일 C++ 워크플로
-  tagline: Windows에서 C++ 개발을 더 쉽게
+  tagline: Windows, macOS, Linux에서 C++ 개발을 더 쉽게
   image:
     src: /logo.svg
     alt: cppx
@@ -21,8 +21,8 @@ hero:
 
 features:
   - icon: 🛠️
-    title: 원클릭 도구 설치
-    details: CMake, Ninja, vcpkg, C++ 컴파일러를 한 번에 설치합니다.
+    title: 호스트별 도구 정책
+    details: Windows 관리형 설치와 macOS/Linux 시스템 도구 기반 워크플로를 함께 지원합니다.
   - icon: 📦
     title: Cargo 스타일 CLI
     details: init → add → build → run → test → pack, 직관적인 명령어 체계입니다.

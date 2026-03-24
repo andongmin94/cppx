@@ -1,7 +1,61 @@
-import type { CppxAction } from "@shared/contracts";
+import type {
+  CompilerPreference,
+  CppxAction,
+  DependencyBackend,
+  PresetConfigPayload,
+  ProjectConfigPayload,
+  ToolInstallMode
+} from "@shared/contracts";
+import type { HostPlatform } from "./platform";
 
 export type ToolName = "cmake" | "ninja" | "vcpkg" | "cxx";
 export type CompilerFamily = "mingw" | "msvc";
+export type ToolSourceKind =
+  | "catalog-archive"
+  | "catalog-git"
+  | "catalog-github-release"
+  | "system-detected"
+  | "msvc-detected";
+
+export interface ToolPolicy {
+  mode: ToolInstallMode;
+  version: string;
+}
+
+export interface CompilerToolPolicy extends ToolPolicy {
+  preferredFamily?: CompilerPreference;
+  msvcInstallationPath?: string;
+}
+
+export interface NormalizedProjectConfig extends ProjectConfigPayload {
+  schemaVersion: number;
+  dependencyBackend: DependencyBackend;
+  compiler: {
+    preferredFamily?: CompilerPreference;
+    msvcInstallationPath?: string;
+  };
+  tools: {
+    cmake: ToolPolicy;
+    ninja: ToolPolicy;
+    vcpkg: ToolPolicy;
+    cxx: CompilerToolPolicy;
+  };
+  presets: PresetConfigPayload[];
+}
+
+export interface ToolCatalogEntry {
+  id: string;
+  tool: ToolName;
+  platform: HostPlatform;
+  arch: "x64";
+  sourceKind: ToolSourceKind;
+  executable: string;
+  version?: string;
+  urls?: string[];
+  repoUrl?: string;
+  assetPatterns?: string[];
+  compilerFamily?: CompilerFamily;
+}
 
 export interface ToolRecord {
   name: ToolName;
@@ -9,6 +63,14 @@ export interface ToolRecord {
   root: string;
   version: string;
   installedAt: string;
+  mode?: ToolInstallMode;
+  sourceKind?: ToolSourceKind;
+  requestedVersion?: string;
+  resolvedVersion?: string;
+  platform?: HostPlatform;
+  arch?: string;
+  compilerFamily?: CompilerFamily;
+  catalogId?: string;
 }
 
 export interface ToolManifest {
@@ -18,7 +80,7 @@ export interface ToolManifest {
 export interface Toolchain {
   cmake: string;
   ninja: string;
-  vcpkg: string;
+  vcpkg?: string;
   cxx: string;
   envPath: string[];
   compilerFamily: CompilerFamily;

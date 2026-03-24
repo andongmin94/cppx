@@ -1,17 +1,19 @@
 {
   "name": "cppx",
   "version": "0.1.0",
-  "description": "Cargo-like C++ workflow on Windows with Electron UI",
+  "description": "Cargo-like C++ workflow with native host support and Electron UI",
   "main": "./out/main/index.js",
   "author": "cppx",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "set ELECTRON_RUN_AS_NODE=&& electron-vite dev",
+    "dev": "node ./scripts/run-electron-vite.mjs dev",
     "build": "electron-vite build",
-    "preview": "set ELECTRON_RUN_AS_NODE=&& electron-vite preview",
+    "preview": "node ./scripts/run-electron-vite.mjs preview",
     "typecheck": "tsc --noEmit",
+    "test": "node ./scripts/run-tests.mjs",
+    "smoke:native": "tsx ./scripts/smoke-native-host.ts",
     "cppx": "tsx src/main/cli.ts"
   },
   "dependencies": {

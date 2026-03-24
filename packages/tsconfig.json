@@ -33,6 +33,7 @@
   "include": [
     "electron.vite.config.ts",
     "tailwind.config.ts",
-    "src"
+    "src",
+    "test"
   ]
 }

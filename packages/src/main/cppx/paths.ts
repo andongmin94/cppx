@@ -1,16 +1,15 @@
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { ensureDir, pathExists, readJsonFile, writeJsonFile } from "./fs-utils";
+import { getHostAdapter } from "./platform";
 import type { ToolManifest, ToolName, ToolRecord } from "./types";
 
 const MANIFEST_FILENAME = "tools-manifest.json";
 const LEGACY_TOOLS_DIRNAME = "tools";
+const hostAdapter = getHostAdapter();
 
 export function getCppxRoot(): string {
-  const localAppData =
-    process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
-  return path.join(localAppData, "cppx");
+  return hostAdapter.getCppxRoot();
 }
 
 export function getToolsRoot(): string {
@@ -18,11 +17,11 @@ export function getToolsRoot(): string {
 }
 
 export function getDownloadsRoot(): string {
-  return path.join(getCppxRoot(), "downloads");
+  return hostAdapter.getDownloadsRoot();
 }
 
 export function getToolRoot(tool: ToolName): string {
-  return path.join(getToolsRoot(), tool);
+  return hostAdapter.getToolRoot(tool);
 }
 
 export function getToolManifestPath(): string {

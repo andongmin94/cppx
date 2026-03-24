@@ -2,7 +2,7 @@
 
 C++ 프로젝트를 시작할 때마다 CMake 설정을 만들고, 빌드 스크립트를 작성하고, 패키지 매니저를 연동하는 과정이 번거롭게 느껴지신 적이 있을 것입니다.
 
-cppx는 바로 그 문제를 해결합니다. Rust의 Cargo처럼 **한 줄의 명령어로 초기화부터 빌드·실행·테스트·패키징**까지 모두 처리할 수 있는 Windows용 C++ 워크플로 도구입니다.
+cppx는 바로 그 문제를 해결합니다. Rust의 Cargo처럼 **한 줄의 명령어로 초기화부터 빌드·실행·테스트·패키징**까지 모두 처리할 수 있는 Windows, macOS, Linux용 C++ 워크플로 도구입니다.
 
 ## 📖 가이드 목차
 
@@ -24,7 +24,7 @@ cppx는 크게 두 가지 인터페이스를 제공합니다.
 
 ### 1단계: 도구 설치
 
-cppx가 관리하는 C++ 툴체인(CMake, Ninja, vcpkg, 컴파일러)을 설치합니다. 모든 도구는 `%LOCALAPPDATA%/cppx/` 하위에 격리되어 시스템 환경을 오염시키지 않습니다.
+Windows에서는 cppx가 관리형 C++ 툴체인(CMake, Ninja, vcpkg, 컴파일러)을 설치할 수 있습니다. macOS/Linux에서는 `cmake`, `ninja`, 시스템 C++ 컴파일러가 PATH에 있는 네이티브 환경을 기본으로 사용합니다.
 
 ```bash
 npm run cppx -- install-tools
@@ -35,7 +35,7 @@ npm run cppx -- install-tools
 원하는 경로에 새로운 C++ 프로젝트를 생성합니다.
 
 ```bash
-npm run cppx -- init C:\dev\myapp --name myapp
+npm run cppx -- init ./myapp --name myapp
 ```
 
 이 명령 하나로 다음 파일들이 자동 생성됩니다.
@@ -46,21 +46,21 @@ npm run cppx -- init C:\dev\myapp --name myapp
 | `.cppx/config.toml` | 프로젝트 설정 원본 |
 | `.cppx/CMakeLists.txt` | CMake 빌드 스크립트 (자동 생성) |
 | `.cppx/CMakePresets.json` | 빌드 프리셋 정의 |
-| `.cppx/vcpkg.json` | vcpkg 의존성 매니페스트 |
+| `.cppx/vcpkg.json` 또는 `.cppx/conanfile.txt` | 선택한 backend의 의존성 매니페스트 |
 | `.vscode/tasks.json` | VSCode 빌드 태스크 |
 | `.vscode/launch.json` | VSCode 디버거 설정 |
 
 ### 3단계: 빌드 & 실행
 
 ```bash
-npm run cppx -- build C:\dev\myapp
-npm run cppx -- run C:\dev\myapp
+npm run cppx -- build ./myapp
+npm run cppx -- run ./myapp
 ```
 
 `run` 명령은 `cargo run`처럼 빌드를 먼저 수행한 뒤 바이너리를 실행합니다.
 
 ::: tip config.toml이 모든 것의 시작점입니다
-`.cppx/config.toml` 파일 하나만 수정하면, cppx가 `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`을 매 빌드 시 자동으로 다시 생성합니다. 생성된 파일을 직접 편집할 필요가 없습니다.
+`.cppx/config.toml` 파일 하나만 수정하면, cppx가 `CMakeLists.txt`, `CMakePresets.json`, backend manifest를 매 빌드 시 자동으로 다시 생성합니다. 생성된 파일을 직접 편집할 필요가 없습니다.
 :::
 
 ## GUI로 시작하기
@@ -80,7 +80,7 @@ GUI에서는 프로젝트 폴더 선택, 빌드/실행, 도구 설치, 실시간
 | 런타임 | Electron (electron-vite) |
 | 렌더러 | React 19, TypeScript, Tailwind CSS |
 | UI 컴포넌트 | shadcn/ui (Radix UI 기반) |
-| C++ 도구 | CMake 3.30, Ninja 1.12, vcpkg, llvm-mingw / MSVC |
+| C++ 도구 | CMake 3.30, Ninja 1.12, vcpkg, llvm-mingw / MSVC / system compiler |
 | 빌드 시스템 | CMake + Ninja (프리셋 기반) |
 | 설정 포맷 | TOML (자체 파서) |
 

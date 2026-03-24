@@ -1,78 +1,114 @@
 # 도구 설치
 
-cppx는 C++ 프로젝트를 빌드하기 위해 네 가지 도구를 사용합니다. 시스템에 이미 설치되어 있더라도, cppx는 자체 관리 경로(`%LOCALAPPDATA%/cppx/`)에 별도로 도구를 설치합니다. 이렇게 하면 기존 환경과 충돌할 걱정이 없습니다.
+cppx는 호스트 운영체제에 따라 도구 정책을 다르게 해석합니다. Windows에서는 관리형 도구 설치를 기본으로 사용하고, macOS/Linux에서는 시스템 도구 기반 네이티브 워크플로를 기본으로 사용합니다.
 
-## 설치되는 도구
+## 빠른 시작
 
-| 도구 | 버전 | 용도 |
-|------|------|------|
-| **CMake** | 3.30.5 | 빌드 시스템 생성 |
-| **Ninja** | 1.12.1 | 고속 빌드 실행 |
-| **vcpkg** | 최신 (rolling) | C++ 패키지 의존성 관리 |
-| **C++ 컴파일러** | llvm-mingw 또는 MSVC | 소스 코드 컴파일 |
+```bash
+cd packages
+npm run cppx -- install-tools
+```
 
-## 한 번에 설치하기
+## 호스트별 기본 동작
 
-터미널에서 아래 명령 하나면 네 가지 도구가 모두 설치됩니다.
+| 호스트 | 기본 backend | CMake / Ninja | vcpkg | C++ 컴파일러 |
+|---|---|---|---|---|
+| Windows | `vcpkg` | `managed` | `managed` | `managed` (MinGW) 또는 `system` (MSVC) |
+| macOS | `none` | `system` | 필요할 때만 별도 준비 | `system` |
+| Linux | `none` | `system` | 필요할 때만 별도 준비 | `system` |
+
+## 시스템 전제조건
+
+- **Windows** — 기본 설정을 그대로 쓰면 cppx가 필요한 도구를 직접 설치합니다. MSVC를 쓰려면 Visual Studio Build Tools의 C++ 워크로드가 필요합니다.
+- **macOS** — `cmake`, `ninja`, `clang++` 또는 `g++`가 PATH에 있어야 합니다. 예: `brew install cmake ninja`
+- **Linux** — `cmake`, `ninja`, `clang++` 또는 `g++`가 PATH에 있어야 합니다. 예: Ubuntu/Debian `sudo apt-get install cmake ninja-build build-essential`
+- **Conan** — `dependency_backend = "conan"`을 사용할 때는 Conan 2.x를 별도로 설치하고 `conan` 명령이 PATH에 있어야 합니다.
+
+## 설치 정책
+
+각 도구는 `managed` 또는 `system` 모드로 해석됩니다.
+
+- `managed` — cppx가 자체 경로 아래 설치하고 manifest에 기록합니다.
+- `system` — 현재 PATH 또는 MSVC 탐지 결과를 사용합니다.
+
+manifest에는 다음 메타데이터가 저장됩니다.
+
+- `mode`
+- `sourceKind`
+- `requestedVersion`
+- `resolvedVersion`
+- `compilerFamily`
+- `catalogId`
+
+## 설치 예시
+
+### Windows에서 MinGW 기반 관리형 설치
+
+```bash
+npm run cppx -- install-tools --compiler mingw
+```
+
+### Windows에서 특정 MSVC 인스턴스 사용
+
+```bash
+npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
+```
+
+### macOS/Linux에서 시스템 도구 확인
 
 ```bash
 npm run cppx -- install-tools
 ```
 
-설치가 완료되면 각 도구의 경로와 버전, 설치 시각이 `%LOCALAPPDATA%/cppx/tools-manifest.json`에 기록됩니다.
-
-## 설치 경로
-
-모든 도구는 `%LOCALAPPDATA%/cppx/` 하위에 정리됩니다.
-
-```text
-%LOCALAPPDATA%/cppx/
-├─ cmake/          # CMake 바이너리
-├─ ninja/          # Ninja 바이너리
-├─ vcpkg/          # vcpkg 저장소 클론
-├─ cxx/            # llvm-mingw 또는 MSVC 경로 정보
-├─ downloads/      # 다운로드 캐시 (설치 후 정리)
-└─ tools-manifest.json
-```
-
-## C++ 컴파일러 선택
-
-cppx는 두 종류의 C++ 컴파일러를 지원합니다.
-
-### MinGW (llvm-mingw)
-
-- 별도 소프트웨어 설치 없이 cppx가 직접 다운로드합니다
-- GitHub에서 최신 `llvm-mingw` ucrt-x86_64 릴리스를 자동으로 찾아 설치합니다
-- Visual Studio가 설치되지 않은 환경에 적합합니다
-
-### MSVC (Visual Studio)
-
-- 시스템에 Visual Studio가 이미 설치되어 있다면 `vswhere.exe`로 자동 감지합니다
-- 감지된 인스턴스가 여러 개일 경우, GUI에서 원하는 버전을 선택할 수 있습니다
-- `VsDevCmd.bat`를 통해 MSVC 관련 환경변수를 자동으로 캡처합니다
-
-::: tip 어떤 컴파일러를 쓸지 모르겠다면
-MinGW를 추천합니다. 추가 소프트웨어 없이 바로 설치할 수 있고, 대부분의 C++ 프로젝트에서 문제없이 동작합니다.
-:::
+이 경우 cppx는 기본 정책에 따라 system 도구를 해석하고 manifest를 갱신합니다. 시스템에 필요한 도구가 없다면 명확한 오류를 반환합니다.
 
 ## 설치 상태 확인
-
-현재 도구 설치 상태를 확인하려면 다음 명령을 사용합니다.
 
 ```bash
 npm run cppx -- status
 ```
 
-각 도구에 대해 `ready` 또는 `missing`으로 상태가 표시됩니다. GUI의 **빌드** 탭에서도 같은 정보를 뱃지로 확인할 수 있습니다.
+가능하면 각 도구에 대해 다음 정보를 함께 표시합니다.
 
-## 업데이트
+- 설치 모드
+- 해석된 버전
+- 소스 종류
+- 실행 파일 경로
 
-도구를 최신 버전으로 업데이트하려면 `install-tools`를 다시 실행하면 됩니다. vcpkg는 `git pull`로 갱신되고, 다른 도구는 새 버전으로 재설치됩니다.
+## 관리형 레이아웃
 
-## 문제가 생겼을 때
+Windows 관리형 도구는 기본적으로 다음 경로 아래 저장됩니다.
 
-| 증상 | 해결 방법 |
-|------|-----------|
-| 다운로드가 자꾸 실패합니다 | 네트워크 환경을 확인해 주세요. cppx는 실패 시 최대 3회까지 자동 재시도합니다. |
-| 설치 후에도 missing으로 나옵니다 | `%LOCALAPPDATA%/cppx/tools-manifest.json` 파일이 정상적으로 기록되었는지 확인해 주세요. |
-| MSVC가 감지되지 않습니다 | Visual Studio Installer에서 "C++를 사용한 데스크톱 개발" 워크로드가 설치되어 있는지 확인해 주세요. |
+```text
+%LOCALAPPDATA%/cppx/
+├─ cmake/
+├─ ninja/
+├─ vcpkg/
+├─ cxx/
+├─ downloads/
+└─ tools-manifest.json
+```
+
+macOS와 Linux도 `tools-manifest.json`과 다운로드 캐시를 사용하지만, 현재 기본 정책은 system 도구이므로 관리형 catalog 설치는 제공하지 않습니다.
+
+- macOS root: `~/Library/Application Support/cppx/`
+- Linux root: `$XDG_DATA_HOME/cppx/` 또는 `~/.local/share/cppx/`
+
+과거 Windows의 `%LOCALAPPDATA%/cppx/tools/` 레이아웃은 자동 마이그레이션됩니다.
+
+## 개발자 검증
+
+```bash
+cd packages
+npm run test
+npm run smoke:native
+```
+
+`smoke:native`는 현재 호스트의 `cmake`, `ninja`, C++ 컴파일러를 사용해 `init -> build -> run -> test -> pack`을 짧게 검증합니다.
+
+## 현재 범위
+
+- macOS/Linux 네이티브 호스트의 `init`, `build`, `run`, `test`, `pack` 흐름을 system 도구 기준으로 지원합니다.
+- Windows는 기존 관리형 설치와 MSVC 탐지 동작을 유지합니다.
+- exact version 설치는 현재 catalog에 등록된 버전에 한해 지원합니다.
+- macOS/Linux용 관리형 도구 catalog와 설치기는 아직 제공하지 않습니다.

@@ -1,115 +1,221 @@
-# 설정 (config.toml)
+# 설정 (`config.toml`)
 
-cppx 프로젝트의 모든 설정은 `.cppx/config.toml` 한 파일에서 관리됩니다. 이 파일을 수정하면 빌드 시 `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`이 자동으로 다시 생성됩니다. 생성된 파일을 직접 수정할 필요가 없습니다.
+cppx 프로젝트의 설정은 `.cppx/config.toml` 한 파일에서 관리합니다.
 
-## 전체 구조
+`build`, `run`, `test`, `pack`이 실행될 때마다 cppx는 이 설정을 기준으로 다음 파일을 다시 생성합니다.
+
+- `.cppx/CMakeLists.txt`
+- `.cppx/CMakePresets.json`
+- `.cppx/vcpkg.json` 또는 `.cppx/conanfile.txt`
+- `.vscode/tasks.json`
+- `.vscode/launch.json`
+
+현재 설정 스키마는 `schema_version = 2`입니다.
+
+## 예시
 
 ```toml
 # cppx configuration
 
 [project]
+schema_version = 2
 name = "myapp"
-default_preset = "debug-x64"
+default_preset = "asan-x64"
 source_file = "src/main.cpp"
 cxx_standard = 20
 target_triplet = "x64-mingw-dynamic"
+dependency_backend = "vcpkg"
+
+[compiler]
+preferred_family = "mingw"
 
 [dependencies]
-packages = ["fmt", "boost-asio"]
+packages = ["fmt", "spdlog"]
 
 [cmake]
 compile_definitions = ["USE_SSL", "APP_VERSION=1"]
 compile_options = ["-Wall", "-Wextra"]
-include_directories = ["include"]
-link_libraries = ["ws2_32"]
+include_directories = ["include", "third_party/fmt/include"]
+link_libraries = ["ws2_32", "bcrypt"]
+
+[tools.cmake]
+mode = "managed"
+version = "default"
+
+[tools.ninja]
+mode = "managed"
+version = "default"
+
+[tools.vcpkg]
+mode = "managed"
+version = "default"
+
+[tools.cxx]
+mode = "managed"
+version = "latest"
+preferred_family = "mingw"
+
+[[presets]]
+name = "asan-x64"
+display_name = "ASan x64"
+build_type = "Debug"
+target_triplet = "x64-mingw-dynamic"
+runnable = true
+
+[[presets]]
+name = "arm64-release"
+display_name = "ARM64 Release"
+build_type = "Release"
+target_triplet = "arm64-windows"
+runnable = false
 ```
 
-## [project] 섹션
+## `[project]`
 
-프로젝트의 기본 정보를 정의합니다.
+프로젝트의 기본 메타데이터와 생성 정책을 정의합니다.
 
 | 키 | 설명 | 기본값 |
-|----|------|--------|
-| `name` | 프로젝트 이름 (바이너리 이름으로도 사용됩니다) | 폴더명 |
-| `default_preset` | 기본 빌드 프리셋 | `debug-x64` |
+|---|---|---|
+| `schema_version` | 설정 스키마 버전 | `2` |
+| `name` | 프로젝트 이름 | 작업 폴더 이름 |
+| `default_preset` | `--preset`을 생략했을 때 사용할 프리셋 | `debug-<host-arch>` |
 | `source_file` | 메인 소스 파일 경로 | `src/main.cpp` |
 | `cxx_standard` | C++ 표준 버전 | `20` |
-| `target_triplet` | vcpkg 타겟 트리플렛 | 컴파일러에 따라 자동 설정 |
+| `target_triplet` | 기본 triplet | 컴파일러 계열에 따라 자동 결정 |
+| `dependency_backend` | 의존성 백엔드 | 호스트별 기본값 |
 
-::: tip target_triplet은 컴파일러에 따라 달라집니다
-MinGW를 사용하면 `x64-mingw-dynamic`, MSVC를 사용하면 `x64-windows`가 자동으로 설정됩니다. 특별한 사유가 없다면 수동으로 바꿀 필요가 없습니다.
-:::
+`default_preset`이 존재하지 않는 프리셋 이름이면 cppx는 첫 번째 프리셋으로 자동 보정합니다.
 
-## [dependencies] 섹션
+호스트별 기본값은 다음과 같습니다.
 
-vcpkg로 관리할 C++ 패키지 목록입니다.
+| 호스트 | `dependency_backend` | 기본 도구 모드 |
+|---|---|---|
+| Windows | `vcpkg` | `cmake`/`ninja`/`vcpkg`/MinGW는 `managed`, MSVC는 `system` |
+| macOS | `none` | 모든 도구가 `system` |
+| Linux | `none` | 모든 도구가 `system` |
+
+`target_triplet`은 Windows MinGW 계열이면 기본적으로 `x64-mingw-dynamic`, Windows MSVC 계열이면 `x64-windows`, macOS는 `x64-osx` 또는 `arm64-osx`, Linux는 `x64-linux` 또는 `arm64-linux`를 사용합니다.
+
+## `[compiler]`
+
+컴파일러 계열과 MSVC 인스턴스 힌트를 지정합니다.
+
+| 키 | 설명 |
+|---|---|
+| `preferred_family` | `mingw` 또는 `msvc` |
+| `msvc_installation_path` | 특정 Visual Studio 설치 경로를 우선 사용 |
+
+## `[dependencies]`
+
+의존성 목록은 항상 `packages` 배열로 저장합니다.
 
 ```toml
 [dependencies]
 packages = ["fmt", "boost-asio", "nlohmann-json"]
 ```
 
-여기에 추가된 패키지는 빌드 시 vcpkg manifest 모드를 통해 자동으로 설치됩니다. CLI에서는 `cppx add <패키지명>`으로도 추가할 수 있습니다.
+실제 생성물은 `dependency_backend`에 따라 달라집니다.
 
-## [cmake] 섹션
+- `vcpkg`: `.cppx/vcpkg.json` 생성
+- `conan`: `.cppx/conanfile.txt` 생성
+- `none`: 별도 의존성 manifest를 생성하지 않음
 
-생성되는 `CMakeLists.txt`에 반영될 CMake 타겟 옵션들입니다. C++ 프로젝트에서 자주 쓰이는 네 가지 설정을 지원합니다.
+`dependency_backend = "none"`에서는 `cppx add`를 사용할 수 없습니다.
 
-### compile_definitions
+## `[cmake]`
 
-전처리기 매크로를 정의합니다. CMake의 `target_compile_definitions(... PRIVATE ...)`에 해당합니다.
+`[cmake]` 항목은 생성되는 `CMakeLists.txt`의 타겟 설정으로 반영됩니다.
+
+- `compile_definitions` -> `target_compile_definitions(... PRIVATE ...)`
+- `compile_options` -> `target_compile_options(... PRIVATE ...)`
+- `include_directories` -> `target_include_directories(... PRIVATE ...)`
+- `link_libraries` -> `target_link_libraries(... PRIVATE ...)`
+
+## `[tools.*]`
+
+도구별 설치 정책을 정의합니다.
+
+### 공통 키
+
+| 키 | 설명 |
+|---|---|
+| `mode` | `managed` 또는 `system` |
+| `version` | `default`, `latest`, 또는 정확한 버전 문자열 |
+
+Windows는 관리형 설치를 기본으로 사용하고, macOS/Linux는 system 도구를 기본으로 사용합니다.
+
+### 컴파일러 전용 키
+
+`[tools.cxx]`에서는 다음 항목도 함께 사용할 수 있습니다.
+
+| 키 | 설명 |
+|---|---|
+| `preferred_family` | `mingw` 또는 `msvc` |
+| `msvc_installation_path` | 특정 MSVC 설치 경로 |
+
+예시:
 
 ```toml
-compile_definitions = ["USE_SSL", "APP_VERSION=1", "DEBUG_MODE"]
+[tools.cxx]
+mode = "system"
+version = "default"
+preferred_family = "msvc"
+msvc_installation_path = "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools"
 ```
 
-### compile_options
+## `[[presets]]`
 
-컴파일러 플래그를 지정합니다. CMake의 `target_compile_options(... PRIVATE ...)`에 해당합니다.
+프리셋은 배열 테이블로 정의합니다. 각 항목은 configure, build, test, package 프리셋을 함께 생성합니다.
 
-```toml
-compile_options = ["-Wall", "-Wextra", "-Wpedantic"]
-```
+| 키 | 설명 |
+|---|---|
+| `name` | 프리셋 고유 이름 |
+| `display_name` | 표시용 이름 |
+| `build_type` | `Debug`, `Release` 같은 CMake build type |
+| `target_triplet` | 프리셋별 triplet |
+| `runnable` | 로컬 호스트에서 실행 가능한 프리셋인지 여부 |
 
-### include_directories
+`runnable = false`인 프리셋은 다음에서 제외되거나 거부됩니다.
 
-추가 헤더 검색 경로를 지정합니다. CMake의 `target_include_directories(... PRIVATE ...)`에 해당합니다.
+- `.vscode/launch.json`
+- `cppx: run ...` VSCode task
+- `cppx run`
 
-```toml
-include_directories = ["include", "third_party/fmt/include"]
-```
+프리셋이 하나도 없으면 cppx는 기본적으로 `debug-<host-arch>`, `release-<host-arch>`를 자동 생성합니다.
 
-### link_libraries
+## 백엔드별 동작
 
-추가로 링크할 라이브러리를 지정합니다. CMake의 `target_link_libraries(... PRIVATE ...)`에 해당합니다.
+### `dependency_backend = "vcpkg"`
 
-```toml
-link_libraries = ["ws2_32", "bcrypt", "pthread"]
-```
+- `.cppx/vcpkg.json`을 생성합니다.
+- `CMakePresets.json`에 vcpkg toolchain file과 `VCPKG_TARGET_TRIPLET`을 반영합니다.
 
-## GUI에서 설정 편집하기
+### `dependency_backend = "conan"`
 
-GUI의 **탐색** 탭에서 **CMake 설정** 카드를 통해 같은 값들을 편집할 수 있습니다.
+- `.cppx/conanfile.txt`를 생성합니다.
+- configure 전에 `.cppx` 폴더에서 `conan install . --output-folder . --build missing`를 실행합니다.
+- VSCode task에도 Conan 준비 단계가 포함됩니다.
+- `conan` 명령은 시스템에 별도로 설치되어 있어야 합니다.
 
-- **config 불러오기** — 현재 `.cppx/config.toml`의 `[cmake]` 섹션을 UI로 가져옵니다
-- **config 저장** — UI에서 수정한 값을 `.cppx/config.toml`에 저장합니다
+### `dependency_backend = "none"`
 
-CLI와 GUI 어느 쪽에서 수정하든 동일한 파일을 기준으로 동작합니다.
+- 백엔드 manifest를 만들지 않습니다.
+- plain CMake 프로젝트처럼 동작합니다.
+- 의존성 추가는 사용자가 직접 관리해야 합니다.
 
 ## 자동 생성 파일과의 관계
 
-`config.toml`을 수정하면 다음 빌드 시 아래 파일들이 자동으로 재생성됩니다.
-
 | 생성 파일 | 반영되는 설정 |
-|-----------|---------------|
-| `.cppx/CMakeLists.txt` | `[project]` + `[cmake]` 전체 |
-| `.cppx/CMakePresets.json` | `name`, `default_preset`, 컴파일러 경로 |
-| `.cppx/vcpkg.json` | `[dependencies].packages` |
-
-::: warning 자동 생성 파일은 직접 수정하지 마세요
-`.cppx/CMakeLists.txt`, `.cppx/CMakePresets.json`, `.cppx/vcpkg.json`은 매 빌드마다 `config.toml` 기준으로 덮어씌워집니다. 수정이 필요하다면 반드시 `config.toml`을 통해 변경해 주세요.
-:::
+|---|---|
+| `.cppx/CMakeLists.txt` | `[project]`, `[cmake]` |
+| `.cppx/CMakePresets.json` | `dependency_backend`, `[[presets]]`, 컴파일러 경로, triplet |
+| `.cppx/vcpkg.json` | `[dependencies].packages` when `vcpkg` |
+| `.cppx/conanfile.txt` | `[dependencies].packages` when `conan` |
+| `.vscode/tasks.json` | `dependency_backend`, `[[presets]]` |
+| `.vscode/launch.json` | 실행 가능한 `[[presets]]` |
 
 ## 레거시 마이그레이션
 
-이전 버전의 cppx에서 `.cppx/project.json`이나 루트의 `vcpkg.json`을 사용했다면, cppx가 자동으로 감지하여 `config.toml` 형식으로 마이그레이션합니다. 별도 조치 없이 기존 프로젝트를 그대로 사용할 수 있습니다.
+이전 버전의 `.cppx/project.json`과 루트 `vcpkg.json`은 계속 자동 마이그레이션됩니다.
+
+마이그레이션이 일어나면 v2 형식의 `.cppx/config.toml`이 새로 생성됩니다.

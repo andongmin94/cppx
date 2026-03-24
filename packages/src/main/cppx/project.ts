@@ -1,300 +1,30 @@
 ﻿import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { CmakeConfig, ProjectConfigPayload } from "@shared/contracts";
+import type { ProjectConfigPayload } from "@shared/contracts";
 import { runSpawn } from "./command-runner";
+import {
+  CPPX_CONFIG_PATH,
+  defaultProjectConfig,
+  mergeProjectConfigPayload,
+  readProjectConfig,
+  resolveEffectiveTargetTriplet,
+  writeProjectConfigToml
+} from "./config";
+import {
+  getDependencyBackendAdapter,
+  type BackendPresetIntegration
+} from "./dependency-backends";
 import { CppxError } from "./errors";
-import { ensureDir, pathExists, readJsonFile, writeJsonFile, writeTextFile } from "./fs-utils";
+import { ensureDir, pathExists, writeJsonFile, writeTextFile } from "./fs-utils";
 import type { CppxLogger } from "./logger";
-import type { Toolchain } from "./types";
+import { getHostAdapter } from "./platform";
+import type { NormalizedProjectConfig, Toolchain } from "./types";
 
-type ProjectConfig = ProjectConfigPayload;
+type ProjectConfig = NormalizedProjectConfig;
 
-const CPPX_CONFIG_PATH = path.join(".cppx", "config.toml");
-const LEGACY_PROJECT_CONFIG_PATH = path.join(".cppx", "project.json");
 const GENERATED_ROOT = ".cppx";
 const LEGACY_GENERATED_ROOT = path.join(".cppx", "generated");
-
-function defaultCmakeConfig(): CmakeConfig {
-  return {
-    compileDefinitions: [],
-    compileOptions: [],
-    includeDirectories: [],
-    linkLibraries: []
-  };
-}
-
-function defaultTargetTripletForCompiler(compilerFamily: Toolchain["compilerFamily"]): string {
-  return compilerFamily === "msvc" ? "x64-windows" : "x64-mingw-dynamic";
-}
-
-function resolveEffectiveTargetTriplet(
-  rawTriplet: string,
-  compilerFamily: Toolchain["compilerFamily"]
-): string {
-  const triplet = rawTriplet.trim();
-  if (triplet.length === 0) {
-    return defaultTargetTripletForCompiler(compilerFamily);
-  }
-
-  if (compilerFamily === "msvc" && /mingw/i.test(triplet)) {
-    return "x64-windows";
-  }
-
-  return triplet;
-}
-
-function defaultConfig(
-  projectName: string,
-  compilerFamily: Toolchain["compilerFamily"] = "mingw"
-): ProjectConfig {
-  return {
-    name: projectName,
-    defaultPreset: "debug-x64",
-    sourceFile: "src/main.cpp",
-    cxxStandard: 20,
-    targetTriplet: defaultTargetTripletForCompiler(compilerFamily),
-    dependencies: [],
-    cmake: defaultCmakeConfig()
-  };
-}
-
-function escapeTomlString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function parseTomlString(raw: string): string {
-  const trimmed = raw.trim();
-  const quoted = trimmed.match(/^"(.*)"$/);
-  if (!quoted) {
-    return trimmed;
-  }
-
-  return quoted[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-}
-
-function parseTomlNumber(raw: string, fallback: number): number {
-  const parsed = Number.parseInt(raw.trim(), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function parseTomlStringArray(raw: string): string[] {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return [];
-  }
-
-  const body = trimmed.slice(1, -1).trim();
-  if (body.length === 0) {
-    return [];
-  }
-
-  return body
-    .split(",")
-    .map((token) => parseTomlString(token))
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-}
-
-function normalizeStringArray(values: unknown): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-
-  return values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-}
-
-function normalizeConfig(
-  raw: Partial<ProjectConfig>,
-  fallbackName: string,
-  base?: ProjectConfig
-): ProjectConfig {
-  const seed = base ?? defaultConfig(fallbackName);
-
-  const rawCmake =
-    raw.cmake && typeof raw.cmake === "object"
-      ? (raw.cmake as Partial<CmakeConfig>)
-      : undefined;
-
-  const nextName = (typeof raw.name === "string" ? raw.name : seed.name).trim() || fallbackName;
-  const nextDefaultPreset =
-    (typeof raw.defaultPreset === "string" ? raw.defaultPreset : seed.defaultPreset).trim() ||
-    "debug-x64";
-  const nextSourceFile =
-    (typeof raw.sourceFile === "string" ? raw.sourceFile : seed.sourceFile).trim() ||
-    "src/main.cpp";
-  const nextTargetTriplet =
-    (typeof raw.targetTriplet === "string" ? raw.targetTriplet : seed.targetTriplet).trim() ||
-    "x64-mingw-dynamic";
-
-  const cxxCandidate =
-    typeof raw.cxxStandard === "number" ? raw.cxxStandard : seed.cxxStandard;
-  const nextCxxStandard = Number.isFinite(cxxCandidate) && cxxCandidate > 0
-    ? Math.trunc(cxxCandidate)
-    : seed.cxxStandard;
-
-  return {
-    name: nextName,
-    defaultPreset: nextDefaultPreset,
-    sourceFile: nextSourceFile,
-    cxxStandard: nextCxxStandard,
-    targetTriplet: nextTargetTriplet,
-    dependencies:
-      raw.dependencies !== undefined
-        ? normalizeStringArray(raw.dependencies)
-        : [...seed.dependencies],
-    cmake: {
-      compileDefinitions:
-        rawCmake && rawCmake.compileDefinitions !== undefined
-          ? normalizeStringArray(rawCmake.compileDefinitions)
-          : [...seed.cmake.compileDefinitions],
-      compileOptions:
-        rawCmake && rawCmake.compileOptions !== undefined
-          ? normalizeStringArray(rawCmake.compileOptions)
-          : [...seed.cmake.compileOptions],
-      includeDirectories:
-        rawCmake && rawCmake.includeDirectories !== undefined
-          ? normalizeStringArray(rawCmake.includeDirectories)
-          : [...seed.cmake.includeDirectories],
-      linkLibraries:
-        rawCmake && rawCmake.linkLibraries !== undefined
-          ? normalizeStringArray(rawCmake.linkLibraries)
-          : [...seed.cmake.linkLibraries]
-    }
-  };
-}
-
-function parseConfigToml(content: string, fallbackName: string): ProjectConfig {
-  const config = defaultConfig(fallbackName);
-  let section = "";
-
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const sectionMatch = trimmed.match(/^\[([a-zA-Z0-9_-]+)\]$/);
-    if (sectionMatch) {
-      section = sectionMatch[1] ?? "";
-      continue;
-    }
-
-    const kvMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.+)$/);
-    if (!kvMatch) {
-      continue;
-    }
-
-    const key = kvMatch[1] ?? "";
-    const value = kvMatch[2] ?? "";
-
-    if (section === "project") {
-      if (key === "name") {
-        config.name = parseTomlString(value);
-      } else if (key === "default_preset") {
-        config.defaultPreset = parseTomlString(value);
-      } else if (key === "source_file") {
-        config.sourceFile = parseTomlString(value);
-      } else if (key === "cxx_standard") {
-        config.cxxStandard = parseTomlNumber(value, config.cxxStandard);
-      } else if (key === "target_triplet") {
-        config.targetTriplet = parseTomlString(value);
-      }
-    } else if (section === "dependencies" && key === "packages") {
-      config.dependencies = parseTomlStringArray(value);
-    } else if (section === "cmake") {
-      if (key === "compile_definitions") {
-        config.cmake.compileDefinitions = parseTomlStringArray(value);
-      } else if (key === "compile_options") {
-        config.cmake.compileOptions = parseTomlStringArray(value);
-      } else if (key === "include_directories") {
-        config.cmake.includeDirectories = parseTomlStringArray(value);
-      } else if (key === "link_libraries") {
-        config.cmake.linkLibraries = parseTomlStringArray(value);
-      }
-    }
-  }
-
-  return normalizeConfig(config, fallbackName);
-}
-
-function tomlArray(values: string[]): string {
-  if (values.length === 0) {
-    return "[]";
-  }
-  return `[${values.map((item) => `"${escapeTomlString(item)}"`).join(", ")}]`;
-}
-
-function configToToml(config: ProjectConfig): string {
-  return `# cppx configuration
-[project]
-name = "${escapeTomlString(config.name)}"
-default_preset = "${escapeTomlString(config.defaultPreset)}"
-source_file = "${escapeTomlString(config.sourceFile)}"
-cxx_standard = ${config.cxxStandard}
-target_triplet = "${escapeTomlString(config.targetTriplet)}"
-
-[dependencies]
-packages = ${tomlArray(config.dependencies)}
-
-[cmake]
-compile_definitions = ${tomlArray(config.cmake.compileDefinitions)}
-compile_options = ${tomlArray(config.cmake.compileOptions)}
-include_directories = ${tomlArray(config.cmake.includeDirectories)}
-link_libraries = ${tomlArray(config.cmake.linkLibraries)}
-`;
-}
-
-async function writeProjectConfigToml(workspace: string, config: ProjectConfig): Promise<void> {
-  const targetPath = path.join(workspace, CPPX_CONFIG_PATH);
-  await writeTextFile(targetPath, configToToml(config));
-}
-
-async function migrateLegacyConfig(workspace: string): Promise<ProjectConfig | null> {
-  const legacyPath = path.join(workspace, LEGACY_PROJECT_CONFIG_PATH);
-  if (!(await pathExists(legacyPath))) {
-    return null;
-  }
-
-  const legacy = await readJsonFile<{ name?: string }>(legacyPath, {});
-  const config = defaultConfig(legacy.name?.trim() || path.basename(workspace));
-
-  const legacyVcpkg = path.join(workspace, "vcpkg.json");
-  if (await pathExists(legacyVcpkg)) {
-    const vcpkg = await readJsonFile<{ dependencies?: unknown }>(legacyVcpkg, {});
-    if (Array.isArray(vcpkg.dependencies)) {
-      config.dependencies = vcpkg.dependencies
-        .filter((dep): dep is string => typeof dep === "string")
-        .map((dep) => dep.trim())
-        .filter((dep) => dep.length > 0);
-    }
-  }
-
-  await writeProjectConfigToml(workspace, config);
-  return config;
-}
-
-async function readProjectConfig(workspace: string): Promise<ProjectConfig> {
-  const configPath = path.join(workspace, CPPX_CONFIG_PATH);
-  const fallbackName = path.basename(workspace);
-
-  if (await pathExists(configPath)) {
-    const content = await fs.readFile(configPath, "utf-8");
-    return parseConfigToml(content, fallbackName);
-  }
-
-  const migrated = await migrateLegacyConfig(workspace);
-  if (migrated) {
-    return migrated;
-  }
-
-  throw new CppxError(
-    "cppx 설정을 찾을 수 없습니다.",
-    `${CPPX_CONFIG_PATH} 경로를 기대했습니다. 먼저 cppx init을 실행하세요.`
-  );
-}
+const hostAdapter = getHostAdapter();
 
 function toPosixPath(value: string): string {
   return value.replace(/\\/g, "/");
@@ -379,90 +109,81 @@ function createGeneratedPresets(
   config: ProjectConfig,
   toolchain: Toolchain
 ): Record<string, unknown> {
-  const vcpkgRoot = path.dirname(toolchain.vcpkg);
-  const vcpkgToolchain = path.join(vcpkgRoot, "scripts", "buildsystems", "vcpkg.cmake");
-  const targetTriplet = resolveEffectiveTargetTriplet(
-    config.targetTriplet,
-    toolchain.compilerFamily
-  );
-
   const common = {
     generator: "Ninja",
-    toolchainFile: vcpkgToolchain,
     cacheVariables: {
       CMAKE_MAKE_PROGRAM: toolchain.ninja,
-      CMAKE_CXX_COMPILER: toolchain.cxx,
-      VCPKG_TARGET_TRIPLET: targetTriplet
-    },
-    environment: {
-      VCPKG_ROOT: vcpkgRoot,
-      VCPKG_MANIFEST_DIR: "${sourceDir}"
+      CMAKE_CXX_COMPILER: toolchain.cxx
     }
   };
+  const presets = config.presets.length > 0 ? config.presets : [];
+
+  const configurePresets = presets.map((preset) => {
+    const { integration } = resolvePresetGeneration(config, toolchain, preset);
+
+    const configurePreset: Record<string, unknown> = {
+      name: preset.name,
+      displayName: preset.displayName ?? preset.name,
+      binaryDir: `\${sourceDir}/../build/${preset.name}`,
+      generator: common.generator,
+      cacheVariables: {
+        ...common.cacheVariables,
+        ...(preset.buildType ? { CMAKE_BUILD_TYPE: preset.buildType } : {}),
+        ...(integration.cacheVariables ?? {})
+      }
+    };
+
+    if (integration.toolchainFile) {
+      configurePreset.toolchainFile = integration.toolchainFile;
+    }
+
+    if (integration.environment && Object.keys(integration.environment).length > 0) {
+      configurePreset.environment = integration.environment;
+    }
+
+    return configurePreset;
+  });
 
   return {
     version: 6,
     cmakeMinimumRequired: { major: 3, minor: 28, patch: 0 },
-    configurePresets: [
-      {
-        name: "debug-x64",
-        displayName: "Debug x64",
-        binaryDir: "${sourceDir}/../build/debug-x64",
-        ...common,
-        cacheVariables: {
-          ...common.cacheVariables,
-          CMAKE_BUILD_TYPE: "Debug"
-        }
-      },
-      {
-        name: "release-x64",
-        displayName: "Release x64",
-        binaryDir: "${sourceDir}/../build/release-x64",
-        ...common,
-        cacheVariables: {
-          ...common.cacheVariables,
-          CMAKE_BUILD_TYPE: "Release"
-        }
-      }
-    ],
-    buildPresets: [
-      { name: "debug-x64", configurePreset: "debug-x64" },
-      { name: "release-x64", configurePreset: "release-x64" }
-    ],
-    testPresets: [
-      {
-        name: "debug-x64",
-        configurePreset: "debug-x64",
-        output: { outputOnFailure: true }
-      },
-      {
-        name: "release-x64",
-        configurePreset: "release-x64",
-        output: { outputOnFailure: true }
-      }
-    ],
-    packagePresets: [
-      { name: "debug-x64", configurePreset: "debug-x64", generators: ["ZIP"] },
-      { name: "release-x64", configurePreset: "release-x64", generators: ["ZIP"] }
-    ]
+    configurePresets,
+    buildPresets: presets.map((preset) => ({
+      name: preset.name,
+      configurePreset: preset.name
+    })),
+    testPresets: presets.map((preset) => ({
+      name: preset.name,
+      configurePreset: preset.name,
+      output: { outputOnFailure: true }
+    })),
+    packagePresets: presets.map((preset) => ({
+      name: preset.name,
+      configurePreset: preset.name,
+      generators: ["ZIP"]
+    }))
   };
 }
 
-function createGeneratedVcpkgManifest(config: ProjectConfig): Record<string, unknown> {
-  return {
-    name: config.name.toLowerCase().replace(/\s+/g, "-"),
-    version: "0.1.0",
-    dependencies: config.dependencies
-  };
+async function removeStaleGeneratedFiles(
+  generatedRoot: string,
+  relativePaths: string[]
+): Promise<void> {
+  for (const relativePath of relativePaths) {
+    await fs.rm(path.join(generatedRoot, relativePath), { force: true });
+  }
 }
 
-async function syncGeneratedFiles(
+export async function syncGeneratedFiles(
   workspace: string,
   config: ProjectConfig,
   toolchain: Toolchain
 ): Promise<void> {
+  const backend = getDependencyBackendAdapter(config.dependencyBackend);
   const generatedRoot = path.join(workspace, GENERATED_ROOT);
   await ensureDir(generatedRoot);
+  await ensureDir(path.join(workspace, ".vscode"));
+  await removeStaleGeneratedFiles(generatedRoot, backend.getStaleGeneratedFiles());
 
   await writeTextFile(
     path.join(generatedRoot, "CMakeLists.txt"),
@@ -472,28 +193,86 @@ async function syncGeneratedFiles(
     path.join(generatedRoot, "CMakePresets.json"),
     createGeneratedPresets(config, toolchain)
   );
-  await writeJsonFile(
-    path.join(generatedRoot, "vcpkg.json"),
-    createGeneratedVcpkgManifest(config)
-  );
+
+  const artifacts = backend.createArtifacts(config, toolchain);
+  for (const artifact of artifacts) {
+    if (artifact.kind === "json") {
+      await writeJsonFile(path.join(generatedRoot, artifact.relativePath), artifact.content);
+    } else {
+      await writeTextFile(
+        path.join(generatedRoot, artifact.relativePath),
+        artifact.content as string
+      );
+    }
+  }
+
+  await writeJsonFile(path.join(workspace, ".vscode", "tasks.json"), createVSCodeTasks(config));
+  await writeJsonFile(path.join(workspace, ".vscode", "launch.json"), createVSCodeLaunch(config));
 }
 
-function buildToolEnv(toolchain: Toolchain, manifestDir: string): NodeJS.ProcessEnv {
-  const vcpkgRoot = path.dirname(toolchain.vcpkg);
+function buildToolEnv(
+  config: ProjectConfig,
+  toolchain: Toolchain,
+  manifestDir: string
+): NodeJS.ProcessEnv {
+  const backend = getDependencyBackendAdapter(config.dependencyBackend);
   const baseEnv = toolchain.baseEnv ?? process.env;
   const basePath = baseEnv.PATH ?? process.env.PATH ?? "";
+  const prefix = toolchain.envPath.join(hostAdapter.getPathSeparator());
 
   return {
     ...baseEnv,
-    PATH: `${toolchain.envPath.join(";")};${basePath}`,
-    VCPKG_ROOT: vcpkgRoot,
-    VCPKG_MANIFEST_DIR: manifestDir,
+    ...backend.getBuildEnv(config, toolchain, manifestDir),
+    PATH:
+      prefix.length > 0
+        ? `${prefix}${hostAdapter.getPathSeparator()}${basePath}`
+        : basePath,
     CXX: toolchain.cxx
   };
 }
 
 function normalizePathForCompare(value: string): string {
-  return path.normalize(value).replace(/\//g, "\\").toLowerCase();
+  return hostAdapter.normalizePath(path.normalize(value));
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readCmakeCacheValue(cache: string, key: string): string | undefined {
+  const match = cache.match(new RegExp(`^${escapeRegex(key)}(?::[^=]+)?=(.+)$`, "m"));
+  return match?.[1]?.trim();
+}
+
+function resolveSourceDirExpression(value: string, sourceRoot: string): string {
+  return path.resolve(value.replaceAll("${sourceDir}", sourceRoot));
+}
+
+function resolvePresetGeneration(
+  config: ProjectConfig,
+  toolchain: Toolchain,
+  preset: ProjectConfig["presets"][number]
+): { targetTriplet: string; integration: BackendPresetIntegration } {
+  const backend = getDependencyBackendAdapter(config.dependencyBackend);
+  const targetTriplet = resolveEffectiveTargetTriplet(
+    preset.targetTriplet ?? config.targetTriplet,
+    toolchain.compilerFamily
+  );
+
+  return {
+    targetTriplet,
+    integration: backend.getPresetIntegration(
+      {
+        ...config,
+        targetTriplet
+      },
+      toolchain,
+      {
+        ...preset,
+        targetTriplet
+      }
+    )
+  };
 }
 
 async function ensureBuildDirUsesCompiler(
@@ -501,7 +280,9 @@ async function ensureBuildDirUsesCompiler(
   preset: string,
   cxxCompiler: string,
   sourceRoot: string,
-  logger: CppxLogger
+  logger: CppxLogger,
+  expectedToolchainFile?: string,
+  expectedCacheVariables: Record<string, string> = {}
 ): Promise<void> {
   const buildDir = path.join(workspace, "build", preset);
   const cachePath = path.join(buildDir, "CMakeCache.txt");
@@ -524,8 +305,26 @@ async function ensureBuildDirUsesCompiler(
     configuredSource
       ? normalizePathForCompare(configuredSource) === normalizePathForCompare(expectedSource)
       : true;
+  const configuredToolchainFile = readCmakeCacheValue(cache, "CMAKE_TOOLCHAIN_FILE");
+  const isToolchainMatched =
+    expectedToolchainFile === undefined
+      ? configuredToolchainFile === undefined
+      : configuredToolchainFile !== undefined &&
+        normalizePathForCompare(configuredToolchainFile) ===
+          normalizePathForCompare(expectedToolchainFile);
 
   if (configuredCompiler === expectedCompiler && isSourceMatched) {
+    const hasCacheVariableMismatch = Object.entries(expectedCacheVariables).some(
+      ([key, expectedValue]) => readCmakeCacheValue(cache, key) !== expectedValue
+    );
+    if (!isToolchainMatched || hasCacheVariableMismatch) {
+      if (!isToolchainMatched) {
+        logger.warn("build", `toolchain 설정이 변경되어 preset '${preset}'의 build 디렉터리를 다시 생성합니다.`);
+      } else {
+        logger.warn("build", `preset 설정이 변경되어 '${preset}'의 build 디렉터리를 다시 생성합니다.`);
+      }
+      await fs.rm(buildDir, { recursive: true, force: true });
+    }
     return;
   }
 
@@ -537,52 +336,113 @@ async function ensureBuildDirUsesCompiler(
   await fs.rm(buildDir, { recursive: true, force: true });
 }
 
-function createVSCodeTasks(projectName: string): Record<string, unknown> {
+function getPresetConfigOrThrow(
+  config: ProjectConfig,
+  presetName: string
+): NonNullable<ProjectConfig["presets"]>[number] {
+  const preset = config.presets.find((item) => item.name === presetName);
+  if (!preset) {
+    throw new CppxError(
+      `프리셋 '${presetName}'을(를) 찾지 못했습니다.`,
+      `사용 가능한 프리셋: ${config.presets.map((item) => item.name).join(", ")}`
+    );
+  }
+  return preset;
+}
+
+function getRunnablePresetOrThrow(
+  config: ProjectConfig,
+  presetName: string
+): NonNullable<ProjectConfig["presets"]>[number] {
+  const preset = getPresetConfigOrThrow(config, presetName);
+  if (preset.runnable === false) {
+    throw new CppxError(
+      `프리셋 '${presetName}'은(는) 실행 가능한 preset으로 표시되지 않았습니다.`
+    );
+  }
+  return preset;
+}
+
+function getRunnablePresets(config: ProjectConfig): ProjectConfig["presets"] {
+  return config.presets.filter((preset) => preset.runnable !== false);
+}
+
+function createVSCodeTasks(config: ProjectConfig): Record<string, unknown> {
+  const backend = getDependencyBackendAdapter(config.dependencyBackend);
+  const backendIntegration = backend.getVSCodeIntegration(config);
+  const runnablePresets = getRunnablePresets(config);
+  const presetsForTasks = config.presets;
+
   return {
     version: "2.0.0",
     tasks: [
-      {
-        label: "cppx: configure debug",
+      ...backendIntegration.tasks,
+      ...presetsForTasks.flatMap((preset) => [
+        {
+          label: `cppx: configure ${preset.name}`,
+          type: "shell",
+          command: `cmake --preset ${preset.name}`,
+          options: { cwd: "${workspaceFolder}/.cppx" },
+          ...(backendIntegration.configureDependsOn.length > 0
+            ? {
+                dependsOn:
+                  backendIntegration.configureDependsOn.length === 1
+                    ? backendIntegration.configureDependsOn[0]
+                    : backendIntegration.configureDependsOn
+              }
+            : {}),
+          group: "build"
+        },
+        {
+          label: `cppx: build ${preset.name}`,
+          type: "shell",
+          command: `cmake --build --preset ${preset.name}`,
+          options: { cwd: "${workspaceFolder}/.cppx" },
+          dependsOn: `cppx: configure ${preset.name}`,
+          group: "build"
+        },
+        {
+          label: `cppx: test ${preset.name}`,
+          type: "shell",
+          command: `ctest --preset ${preset.name} --output-on-failure`,
+          options: { cwd: "${workspaceFolder}/.cppx" },
+          dependsOn: `cppx: build ${preset.name}`,
+          group: "test"
+        },
+        {
+          label: `cppx: pack ${preset.name}`,
+          type: "shell",
+          command: `cpack --preset ${preset.name}`,
+          options: { cwd: "${workspaceFolder}/.cppx" },
+          dependsOn: `cppx: build ${preset.name}`,
+          group: "build"
+        }
+      ]),
+      ...runnablePresets.map((preset) => ({
+        label: `cppx: run ${preset.name}`,
         type: "shell",
-        command: "cmake --preset debug-x64",
-        options: { cwd: "${workspaceFolder}/.cppx" },
-        group: "build"
-      },
-      {
-        label: "cppx: build debug",
-        type: "shell",
-        command: "cmake --build --preset debug-x64",
-        options: { cwd: "${workspaceFolder}/.cppx" },
-        dependsOn: "cppx: configure debug",
-        group: "build"
-      },
-      {
-        label: "cppx: run debug",
-        type: "shell",
-        command: `\${workspaceFolder}/build/debug-x64/${projectName}.exe`,
-        dependsOn: "cppx: build debug"
-      }
+        command: `\${workspaceFolder}/build/${preset.name}/${hostAdapter.getBinaryName(config.name)}`,
+        dependsOn: `cppx: build ${preset.name}`
+      }))
     ]
   };
 }
 
-function createVSCodeLaunch(projectName: string): Record<string, unknown> {
+function createVSCodeLaunch(config: ProjectConfig): Record<string, unknown> {
   return {
     version: "0.2.0",
-    configurations: [
-      {
-        name: "cppx: Launch Debug",
-        type: "cppdbg",
-        request: "launch",
-        program: `\${workspaceFolder}/build/debug-x64/${projectName}.exe`,
-        args: [],
-        stopAtEntry: false,
-        cwd: "\${workspaceFolder}",
-        environment: [],
-        externalConsole: false,
-        MIMode: "gdb"
-      }
-    ]
+    configurations: getRunnablePresets(config).map((preset) => ({
+      name: `cppx: Launch ${preset.displayName ?? preset.name}`,
+      type: "cppdbg",
+      request: "launch",
+      program: `\${workspaceFolder}/build/${preset.name}/${hostAdapter.getBinaryName(config.name)}`,
+      args: [],
+      stopAtEntry: false,
+      cwd: "\${workspaceFolder}",
+      environment: [],
+      externalConsole: false,
+      MIMode: "gdb"
+    }))
   };
 }
 
@@ -595,22 +455,26 @@ export async function saveProjectConfig(
   payload: ProjectConfigPayload
 ): Promise<ProjectConfigPayload> {
   const current = await readProjectConfig(workspace);
-  const merged = normalizeConfig(
-    {
-      ...current,
-      ...payload,
-      cmake: {
-        ...current.cmake,
-        ...(payload?.cmake ?? {})
-      },
-      dependencies: payload?.dependencies ?? current.dependencies
-    },
-    path.basename(workspace),
-    current
-  );
+  const merged = mergeProjectConfigPayload(current, payload, path.basename(workspace));
 
   await writeProjectConfigToml(workspace, merged);
   return merged;
+}
+
+export async function syncProjectFiles(
+  workspace: string,
+  toolchain: Toolchain
+): Promise<void> {
+  const config = await readProjectConfig(workspace);
+  await syncGeneratedFiles(workspace, config, toolchain);
+}
+
+export async function ensureRunnablePreset(
+  workspace: string,
+  preset: string
+): Promise<void> {
+  const config = await readProjectConfig(workspace);
+  getRunnablePresetOrThrow(config, preset);
 }
 
 export async function initProject(
@@ -646,7 +510,7 @@ export async function initProject(
   await ensureDir(path.join(targetWorkspace, ".vscode"));
   await ensureDir(path.join(targetWorkspace, ".cppx"));
 
-  const config = defaultConfig(name, toolchain.compilerFamily);
+  const config = defaultProjectConfig(name, toolchain.compilerFamily);
   await writeProjectConfigToml(targetWorkspace, config);
 
   const sourcePath = path.join(targetWorkspace, config.sourceFile);
@@ -655,8 +519,6 @@ export async function initProject(
   }
 
   await syncGeneratedFiles(targetWorkspace, config, toolchain);
-  await writeJsonFile(path.join(targetWorkspace, ".vscode", "tasks.json"), createVSCodeTasks(name));
-  await writeJsonFile(path.join(targetWorkspace, ".vscode", "launch.json"), createVSCodeLaunch(name));
 
   const gitignorePath = path.join(targetWorkspace, ".gitignore");
   if (!(await pathExists(gitignorePath))) {
@@ -702,9 +564,7 @@ export async function addDependency(
 
   const config = await readProjectConfig(workspace);
   const dep = dependency.trim();
-  if (!config.dependencies.includes(dep)) {
-    config.dependencies.push(dep);
-  }
+  getDependencyBackendAdapter(config.dependencyBackend).addDependency(config, dep);
 
   await writeProjectConfigToml(workspace, config);
   logger.success("add", `의존성 '${dep}'이(가) ${CPPX_CONFIG_PATH}에 추가되었습니다`);
@@ -717,13 +577,33 @@ export async function buildWithPreset(
   logger: CppxLogger
 ): Promise<void> {
   const config = await readProjectConfig(workspace);
+  const presetConfig = getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
 
   const generatedRoot = path.join(workspace, GENERATED_ROOT);
-  const env = buildToolEnv(toolchain, generatedRoot);
+  await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
+    config,
+    toolchain,
+    generatedRoot,
+    logger
+  );
 
   logger.info("build", `컴파일러: ${toolchain.cxx}`);
-  await ensureBuildDirUsesCompiler(workspace, preset, toolchain.cxx, generatedRoot, logger);
+  const { integration } = resolvePresetGeneration(config, toolchain, presetConfig);
+  await ensureBuildDirUsesCompiler(
+    workspace,
+    preset,
+    toolchain.cxx,
+    generatedRoot,
+    logger,
+    integration.toolchainFile
+      ? resolveSourceDirExpression(integration.toolchainFile, generatedRoot)
+      : undefined,
+    {
+      ...(presetConfig.buildType ? { CMAKE_BUILD_TYPE: presetConfig.buildType } : {}),
+      ...integration.cacheVariables
+    }
+  );
 
   await runSpawn(
     {
@@ -731,7 +611,7 @@ export async function buildWithPreset(
       command: toolchain.cmake,
       args: ["--preset", preset, "--no-warn-unused-cli"],
       cwd: generatedRoot,
-      env
+      env: buildToolEnv(config, toolchain, generatedRoot)
     },
     logger
   );
@@ -741,7 +621,7 @@ export async function buildWithPreset(
       command: toolchain.cmake,
       args: ["--build", "--preset", preset],
       cwd: generatedRoot,
-      env
+      env: buildToolEnv(config, toolchain, generatedRoot)
     },
     logger
   );
@@ -756,7 +636,8 @@ export async function runPresetBinary(
   logger: CppxLogger
 ): Promise<void> {
   const config = await readProjectConfig(workspace);
-  const binary = path.join(workspace, "build", preset, `${config.name}.exe`);
+  getRunnablePresetOrThrow(config, preset);
+  const binary = path.join(workspace, "build", preset, hostAdapter.getBinaryName(config.name));
 
   if (!(await pathExists(binary))) {
     throw new CppxError(
@@ -769,7 +650,7 @@ export async function runPresetBinary(
       action: "run",
       command: binary,
       cwd: workspace,
-      env: buildToolEnv(toolchain, path.join(workspace, GENERATED_ROOT))
+      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
     },
     logger
   );
@@ -782,13 +663,20 @@ export async function testPreset(
   toolchain: Toolchain,
   logger: CppxLogger
 ): Promise<void> {
-  const ctest = path.join(path.dirname(toolchain.cmake), "ctest.exe");
+  const ctest = path.join(path.dirname(toolchain.cmake), hostAdapter.getCtestExecutableName());
   if (!(await pathExists(ctest))) {
-    throw new CppxError(`cmake 옆에서 ctest.exe를 찾지 못했습니다: ${ctest}`);
+    throw new CppxError(`cmake 옆에서 ${hostAdapter.getCtestExecutableName()}를 찾지 못했습니다: ${ctest}`);
   }
 
   const config = await readProjectConfig(workspace);
+  getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
+  await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
+    config,
+    toolchain,
+    path.join(workspace, GENERATED_ROOT),
+    logger
+  );
 
   await runSpawn(
     {
@@ -796,7 +684,7 @@ export async function testPreset(
       command: ctest,
       args: ["--preset", preset, "--output-on-failure"],
       cwd: path.join(workspace, GENERATED_ROOT),
-      env: buildToolEnv(toolchain, path.join(workspace, GENERATED_ROOT))
+      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
     },
     logger
   );
@@ -809,13 +697,20 @@ export async function packagePreset(
   toolchain: Toolchain,
   logger: CppxLogger
 ): Promise<void> {
-  const cpack = path.join(path.dirname(toolchain.cmake), "cpack.exe");
+  const cpack = path.join(path.dirname(toolchain.cmake), hostAdapter.getCpackExecutableName());
   if (!(await pathExists(cpack))) {
-    throw new CppxError(`cmake 옆에서 cpack.exe를 찾지 못했습니다: ${cpack}`);
+    throw new CppxError(`cmake 옆에서 ${hostAdapter.getCpackExecutableName()}를 찾지 못했습니다: ${cpack}`);
   }
 
   const config = await readProjectConfig(workspace);
+  getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
+  await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
+    config,
+    toolchain,
+    path.join(workspace, GENERATED_ROOT),
+    logger
+  );
 
   await runSpawn(
     {
@@ -823,7 +718,7 @@ export async function packagePreset(
       command: cpack,
       args: ["--preset", preset],
       cwd: path.join(workspace, GENERATED_ROOT),
-      env: buildToolEnv(toolchain, path.join(workspace, GENERATED_ROOT))
+      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
     },
     logger
   );

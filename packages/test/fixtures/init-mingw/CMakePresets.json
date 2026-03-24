@@ -1,0 +1,86 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "debug-x64",
+      "displayName": "Debug x64",
+      "binaryDir": "${sourceDir}/../build/debug-x64",
+      "generator": "Ninja",
+      "toolchainFile": "C:\\cppx-tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "C:\\cppx-tools\\ninja\\ninja.exe",
+        "CMAKE_CXX_COMPILER": "C:\\cppx-tools\\llvm-mingw\\bin\\clang++.exe",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "environment": {
+        "VCPKG_ROOT": "C:\\cppx-tools\\vcpkg",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}"
+      }
+    },
+    {
+      "name": "release-x64",
+      "displayName": "Release x64",
+      "binaryDir": "${sourceDir}/../build/release-x64",
+      "generator": "Ninja",
+      "toolchainFile": "C:\\cppx-tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "C:\\cppx-tools\\ninja\\ninja.exe",
+        "CMAKE_CXX_COMPILER": "C:\\cppx-tools\\llvm-mingw\\bin\\clang++.exe",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "environment": {
+        "VCPKG_ROOT": "C:\\cppx-tools\\vcpkg",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug-x64",
+      "configurePreset": "debug-x64"
+    },
+    {
+      "name": "release-x64",
+      "configurePreset": "release-x64"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug-x64",
+      "configurePreset": "debug-x64",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-x64",
+      "configurePreset": "release-x64",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "debug-x64",
+      "configurePreset": "debug-x64",
+      "generators": [
+        "ZIP"
+      ]
+    },
+    {
+      "name": "release-x64",
+      "configurePreset": "release-x64",
+      "generators": [
+        "ZIP"
+      ]
+    }
+  ]
+}

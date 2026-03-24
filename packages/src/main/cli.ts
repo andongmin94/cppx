@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import type { LogEntry, RunCommandPayload } from "@shared/contracts";
+import type { LogEntry, RunCommandPayload, ToolStatusDetail } from "@shared/contracts";
 import { CppxService } from "./cppx/service";
 
 function printLog(entry: LogEntry): void {
@@ -36,10 +36,14 @@ program
   .description(
     "Install CMake, Ninja, vcpkg, and local C++ compiler under %LOCALAPPDATA%/cppx"
   )
-  .action(async () => {
+  .option("--compiler <compiler>", "Compiler family (mingw or msvc)")
+  .option("--msvc-installation-path <path>", "Preferred MSVC installation path")
+  .action(async (options: { compiler?: "mingw" | "msvc"; msvcInstallationPath?: string }) => {
     await execute({
       action: "install-tools",
-      workspace: process.cwd()
+      workspace: process.cwd(),
+      compilerPreference: options.compiler,
+      msvcInstallationPath: options.msvcInstallationPath
     });
   });
 
@@ -69,7 +73,7 @@ program
 program
   .command("build [workspace]")
   .description("Configure and build with cmake preset")
-  .option("-p, --preset <preset>", "Preset name", "debug-x64")
+  .option("-p, --preset <preset>", "Preset name")
   .action(async (workspace: string | undefined, options: { preset: string }) => {
     await execute({
       action: "build",
@@ -81,7 +85,7 @@ program
 program
   .command("run [workspace]")
   .description("Build (incremental) then run binary from preset output")
-  .option("-p, --preset <preset>", "Preset name", "debug-x64")
+  .option("-p, --preset <preset>", "Preset name")
   .action(async (workspace: string | undefined, options: { preset: string }) => {
     await execute({
       action: "run",
@@ -93,7 +97,7 @@ program
 program
   .command("test [workspace]")
   .description("Run ctest preset")
-  .option("-p, --preset <preset>", "Preset name", "debug-x64")
+  .option("-p, --preset <preset>", "Preset name")
   .action(async (workspace: string | undefined, options: { preset: string }) => {
     await execute({
       action: "test",
@@ -105,7 +109,7 @@ program
 program
   .command("pack [workspace]")
   .description("Run cpack preset")
-  .option("-p, --preset <preset>", "Preset name", "debug-x64")
+  .option("-p, --preset <preset>", "Preset name")
   .action(async (workspace: string | undefined, options: { preset: string }) => {
     await execute({
       action: "pack",
@@ -119,15 +123,22 @@ program
   .description("Show installed tool status")
   .action(async () => {
     const status = await service.toolStatus();
-    const rows = [
-      ["cmake", status.cmake],
-      ["ninja", status.ninja],
-      ["vcpkg", status.vcpkg],
-      ["cxx", status.cxx]
+    const rows: Array<[string, boolean, ToolStatusDetail | undefined]> = [
+      ["cmake", status.cmake, status.details?.cmake],
+      ["ninja", status.ninja, status.details?.ninja],
+      ["vcpkg", status.vcpkg, status.details?.vcpkg],
+      ["cxx", status.cxx, status.details?.cxx]
     ];
 
-    for (const [name, ready] of rows) {
-      console.log(`${name}: ${ready ? "ready" : "missing"}`);
+    for (const [name, ready, detail] of rows) {
+      const detailParts = [
+        detail?.mode,
+        detail?.resolvedVersion,
+        detail?.sourceKind,
+        detail?.executable
+      ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+      const suffix = detailParts.length > 0 ? ` (${detailParts.join(", ")})` : "";
+      console.log(`${name}: ${ready ? "ready" : "missing"}${suffix}`);
     }
   });
 

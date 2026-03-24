@@ -1,6 +1,8 @@
 ﻿import path from "node:path";
 import type {
+  DependencyBackend,
   ProjectConfigPayload,
+  ProjectToolPoliciesPayload,
   RunCommandPayload,
   RunCommandResult,
   ToolStatus
@@ -8,10 +10,13 @@ import type {
 import { CppxError } from "./errors";
 import { getToolStatus, installAllTools, resolveToolchainOrThrow } from "./installers";
 import { CppxLogger, type LogSink } from "./logger";
+import { getHostAdapter } from "./platform";
+import { getDefaultPresetName } from "./config";
 import {
   addDependency,
   buildWithPreset,
   cleanupLegacyWorkspaceFiles,
+  ensureRunnablePreset,
   initProject,
   loadProjectConfig,
   packagePreset,
@@ -20,12 +25,115 @@ import {
   testPreset
 } from "./project";
 
+const hostAdapter = getHostAdapter();
+
 export class CppxService {
   private readonly logger: CppxLogger;
   private isBusy = false;
 
   constructor(logSink: LogSink) {
     this.logger = new CppxLogger(logSink);
+  }
+
+  private mergeToolPolicies(
+    base: ProjectToolPoliciesPayload | undefined,
+    next: ProjectToolPoliciesPayload | undefined
+  ): ProjectToolPoliciesPayload | undefined {
+    if (!base && !next) {
+      return undefined;
+    }
+
+    return {
+      cmake: { ...base?.cmake, ...next?.cmake },
+      ninja: { ...base?.ninja, ...next?.ninja },
+      vcpkg: { ...base?.vcpkg, ...next?.vcpkg },
+      cxx: { ...base?.cxx, ...next?.cxx }
+    };
+  }
+
+  private getPayloadToolPolicies(payload: RunCommandPayload): ProjectToolPoliciesPayload | undefined {
+    const policies = this.mergeToolPolicies(undefined, payload.toolPolicies);
+
+    if (!payload.compilerPreference && !payload.msvcInstallationPath) {
+      return policies;
+    }
+
+    const cxxPolicy = { ...(policies?.cxx ?? {}) };
+    if (payload.compilerPreference === "msvc") {
+      cxxPolicy.mode = cxxPolicy.mode ?? "system";
+      cxxPolicy.preferredFamily = "msvc";
+    } else if (payload.compilerPreference === "mingw") {
+      cxxPolicy.mode = cxxPolicy.mode ?? "managed";
+      cxxPolicy.preferredFamily = "mingw";
+      cxxPolicy.version = cxxPolicy.version ?? "latest";
+    }
+
+    if (payload.msvcInstallationPath?.trim()) {
+      cxxPolicy.msvcInstallationPath = payload.msvcInstallationPath.trim();
+    }
+
+    return {
+      ...(policies ?? {}),
+      cxx: cxxPolicy
+    };
+  }
+
+  private async resolveExecutionToolPolicies(
+    workspace: string,
+    payload: RunCommandPayload
+  ): Promise<ProjectToolPoliciesPayload | undefined> {
+    const payloadPolicies = this.getPayloadToolPolicies(payload);
+
+    if (payload.action === "install-tools" || payload.action === "init") {
+      return payloadPolicies;
+    }
+
+    const projectConfig = await loadProjectConfig(workspace);
+    return this.mergeToolPolicies(projectConfig.tools, payloadPolicies);
+  }
+
+  private async resolveExecutionBackend(
+    workspace: string,
+    payload: RunCommandPayload
+  ): Promise<DependencyBackend> {
+    const hostDefaultBackend = hostAdapter.getDefaultDependencyBackend();
+
+    if (payload.action === "init") {
+      return hostDefaultBackend;
+    }
+
+    if (payload.action === "install-tools") {
+      try {
+        const projectConfig = await loadProjectConfig(workspace);
+        return projectConfig.dependencyBackend ?? hostDefaultBackend;
+      } catch {
+        return hostDefaultBackend;
+      }
+    }
+
+    const projectConfig = await loadProjectConfig(workspace);
+    return projectConfig.dependencyBackend ?? hostDefaultBackend;
+  }
+
+  private async resolveExecutionPreset(
+    workspace: string,
+    payload: RunCommandPayload
+  ): Promise<string> {
+    if (payload.preset?.trim()) {
+      return payload.preset.trim();
+    }
+
+    if (
+      payload.action === "build" ||
+      payload.action === "run" ||
+      payload.action === "test" ||
+      payload.action === "pack"
+    ) {
+      const projectConfig = await loadProjectConfig(workspace);
+      return projectConfig.defaultPreset;
+    }
+
+    return getDefaultPresetName();
   }
 
   async execute(payload: RunCommandPayload): Promise<RunCommandResult> {
@@ -39,23 +147,28 @@ export class CppxService {
       payload.workspace && payload.workspace.trim().length > 0
         ? path.resolve(payload.workspace)
         : process.cwd();
-    const preset = payload.preset?.trim() || "debug-x64";
+    let dependencyBackend: DependencyBackend = "vcpkg";
+    let toolPolicies: ProjectToolPoliciesPayload | undefined;
     let resolvedWorkspace = workspace;
+    let preset = getDefaultPresetName();
 
     try {
+      preset = await this.resolveExecutionPreset(workspace, payload);
+      dependencyBackend = await this.resolveExecutionBackend(workspace, payload);
+      toolPolicies = await this.resolveExecutionToolPolicies(workspace, payload);
       this.logger.info(action, `'${action}' 시작`);
 
       switch (action) {
         case "install-tools": {
-          await installAllTools(
-            this.logger,
-            payload.compilerPreference,
-            payload.msvcInstallationPath
-          );
+          await installAllTools(this.logger, toolPolicies, dependencyBackend);
           break;
         }
         case "init": {
-          const toolchain = await resolveToolchainOrThrow(this.logger);
+          const toolchain = await resolveToolchainOrThrow(
+            this.logger,
+            toolPolicies,
+            dependencyBackend
+          );
           const initializedWorkspace = await initProject(
             workspace,
             payload.projectName,
@@ -71,13 +184,22 @@ export class CppxService {
           break;
         }
         case "build": {
-          const toolchain = await resolveToolchainOrThrow(this.logger);
+          const toolchain = await resolveToolchainOrThrow(
+            this.logger,
+            toolPolicies,
+            dependencyBackend
+          );
           await buildWithPreset(workspace, preset, toolchain, this.logger);
           await cleanupLegacyWorkspaceFiles(workspace, this.logger);
           break;
         }
         case "run": {
-          const toolchain = await resolveToolchainOrThrow(this.logger);
+          await ensureRunnablePreset(workspace, preset);
+          const toolchain = await resolveToolchainOrThrow(
+            this.logger,
+            toolPolicies,
+            dependencyBackend
+          );
           this.logger.info("run", `run 전에 preset '${preset}'을 먼저 build합니다`);
           await buildWithPreset(workspace, preset, toolchain, this.logger);
           await cleanupLegacyWorkspaceFiles(workspace, this.logger);
@@ -85,12 +207,20 @@ export class CppxService {
           break;
         }
         case "test": {
-          const toolchain = await resolveToolchainOrThrow(this.logger);
+          const toolchain = await resolveToolchainOrThrow(
+            this.logger,
+            toolPolicies,
+            dependencyBackend
+          );
           await testPreset(workspace, preset, toolchain, this.logger);
           break;
         }
         case "pack": {
-          const toolchain = await resolveToolchainOrThrow(this.logger);
+          const toolchain = await resolveToolchainOrThrow(
+            this.logger,
+            toolPolicies,
+            dependencyBackend
+          );
           await packagePreset(workspace, preset, toolchain, this.logger);
           break;
         }

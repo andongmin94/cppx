@@ -8,15 +8,17 @@ import { execFile as execFileCb } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import type {
-  CompilerPreference,
+  DependencyBackend,
   CompilerScanResult,
   MsvcCandidate,
+  ProjectToolPoliciesPayload,
   ToolStatus
 } from "@shared/contracts";
 import { runSpawn } from "./command-runner";
 import { CppxError } from "./errors";
 import { ensureDir, findFileRecursive, pathExists } from "./fs-utils";
 import type { CppxLogger } from "./logger";
+import { getHostAdapter } from "./platform";
 import {
   ensureCppxLayout,
   getDownloadsRoot,
@@ -24,12 +26,28 @@ import {
   readToolManifest,
   upsertToolRecord
 } from "./paths";
-import type { CompilerFamily, ToolName, Toolchain } from "./types";
+import {
+  DEFAULT_TOOL_VERSION_TOKEN,
+  resolveToolCatalogEntry
+} from "./tool-catalog";
+import type {
+  CompilerFamily,
+  CompilerToolPolicy,
+  ToolName,
+  ToolPolicy,
+  ToolRecord,
+  ToolSourceKind,
+  Toolchain
+} from "./types";
 
 interface ArchiveToolSource {
   version: string;
   urls: string[];
   executable: string;
+  sourceKind: ToolSourceKind;
+  requestedVersion: string;
+  catalogId?: string;
+  compilerFamily?: CompilerFamily;
 }
 
 interface GitHubAsset {
@@ -51,29 +69,51 @@ interface MsvcCompilerInfo {
   clPath: string;
 }
 
-const execFile = promisify(execFileCb);
+interface ResolvedToolInfo {
+  name: ToolName;
+  executable: string;
+  root: string;
+  version: string;
+  mode: "managed" | "system";
+  sourceKind: ToolSourceKind;
+  requestedVersion: string;
+  resolvedVersion: string;
+  compilerFamily?: CompilerFamily;
+  catalogId?: string;
+  baseEnv?: NodeJS.ProcessEnv;
+}
 
-const STATIC_ARCHIVE_TOOL_SOURCES: Record<"cmake" | "ninja", ArchiveToolSource> = {
-  cmake: {
-    version: "3.30.5",
-    urls: [
-      "https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-windows-x86_64.zip",
-      "https://cmake.org/files/v3.30/cmake-3.30.5-windows-x86_64.zip"
-    ],
-    executable: "cmake.exe"
-  },
-  ninja: {
-    version: "1.12.1",
-    urls: ["https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip"],
-    executable: "ninja.exe"
-  }
-};
+interface ResolvedToolExecutable {
+  executable: string;
+  root: string;
+  record?: ToolRecord;
+  sourceKind: ToolSourceKind;
+  mode: "managed" | "system";
+  requestedVersion?: string;
+  resolvedVersion?: string;
+  compilerFamily?: CompilerFamily;
+  catalogId?: string;
+}
+
+interface ResolvedToolPolicies {
+  cmake: ToolPolicy;
+  ninja: ToolPolicy;
+  vcpkg: ToolPolicy;
+  cxx: CompilerToolPolicy;
+}
+
+const execFile = promisify(execFileCb);
+const hostAdapter = getHostAdapter();
 
 const EXECUTABLE_CANDIDATES_BY_TOOL: Record<ToolName, string[]> = {
-  cmake: ["cmake.exe"],
-  ninja: ["ninja.exe"],
-  vcpkg: ["vcpkg.exe"],
-  cxx: ["clang++.exe", "cl.exe"]
+  cmake: [hostAdapter.getExecutableName("cmake")],
+  ninja: [hostAdapter.getExecutableName("ninja")],
+  vcpkg: [hostAdapter.getExecutableName("vcpkg")],
+  cxx: [
+    hostAdapter.getExecutableName("clang++"),
+    hostAdapter.getExecutableName("g++"),
+    hostAdapter.getExecutableName("cl")
+  ]
 };
 
 const GITHUB_API_HEADERS = {
@@ -81,13 +121,126 @@ const GITHUB_API_HEADERS = {
   "User-Agent": "cppx"
 };
 
+function normalizeToolMode(value: unknown, fallback: "managed" | "system"): "managed" | "system" {
+  return value === "system" || value === "managed" ? value : fallback;
+}
+
+function normalizeToolVersion(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function normalizeCompilerFamily(
+  value: unknown,
+  fallback: CompilerFamily
+): CompilerFamily {
+  return value === "msvc" || value === "mingw" ? value : fallback;
+}
+
+function getHostArchLabel(): string {
+  return process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : process.arch;
+}
+
+function getDefaultToolMode(tool: ToolName, compilerFamily: CompilerFamily): "managed" | "system" {
+  return hostAdapter.getDefaultToolMode(tool, compilerFamily);
+}
+
+function getDefaultToolVersion(
+  tool: ToolName,
+  mode: "managed" | "system",
+  compilerFamily: CompilerFamily
+): string {
+  if (tool === "cxx" && mode === "managed" && compilerFamily !== "msvc") {
+    return "latest";
+  }
+
+  return DEFAULT_TOOL_VERSION_TOKEN;
+}
+
+export function isPinnedToolVersion(version: string): boolean {
+  const normalizedVersion = version.trim();
+  return (
+    normalizedVersion.length > 0 &&
+    normalizedVersion !== DEFAULT_TOOL_VERSION_TOKEN &&
+    normalizedVersion !== "latest"
+  );
+}
+
+export function shouldReuseManagedArchiveTool(
+  existingRecord: ToolRecord | undefined,
+  source: ArchiveToolSource
+): boolean {
+  if (!isPinnedToolVersion(source.requestedVersion)) {
+    return true;
+  }
+
+  if (!existingRecord || (existingRecord.mode ?? "managed") !== "managed") {
+    return false;
+  }
+
+  const recordedVersion = existingRecord.resolvedVersion ?? existingRecord.version;
+  return (
+    recordedVersion === source.version &&
+    (existingRecord.sourceKind ?? source.sourceKind) === source.sourceKind &&
+    (existingRecord.catalogId ?? source.catalogId) === source.catalogId
+  );
+}
+
+function resolveRequestedPolicies(
+  toolPolicies?: ProjectToolPoliciesPayload
+): ResolvedToolPolicies {
+  const compilerFamily = normalizeCompilerFamily(toolPolicies?.cxx?.preferredFamily, "mingw");
+  const defaultCmakeMode = getDefaultToolMode("cmake", compilerFamily);
+  const defaultNinjaMode = getDefaultToolMode("ninja", compilerFamily);
+  const defaultVcpkgMode = getDefaultToolMode("vcpkg", compilerFamily);
+  const defaultCxxMode = getDefaultToolMode("cxx", compilerFamily);
+
+  return {
+    cmake: {
+      mode: normalizeToolMode(toolPolicies?.cmake?.mode, defaultCmakeMode),
+      version: normalizeToolVersion(
+        toolPolicies?.cmake?.version,
+        getDefaultToolVersion("cmake", defaultCmakeMode, compilerFamily)
+      )
+    },
+    ninja: {
+      mode: normalizeToolMode(toolPolicies?.ninja?.mode, defaultNinjaMode),
+      version: normalizeToolVersion(
+        toolPolicies?.ninja?.version,
+        getDefaultToolVersion("ninja", defaultNinjaMode, compilerFamily)
+      )
+    },
+    vcpkg: {
+      mode: normalizeToolMode(toolPolicies?.vcpkg?.mode, defaultVcpkgMode),
+      version: normalizeToolVersion(
+        toolPolicies?.vcpkg?.version,
+        getDefaultToolVersion("vcpkg", defaultVcpkgMode, compilerFamily)
+      )
+    },
+    cxx: {
+      mode: normalizeToolMode(toolPolicies?.cxx?.mode, defaultCxxMode),
+      version: normalizeToolVersion(
+        toolPolicies?.cxx?.version,
+        getDefaultToolVersion("cxx", defaultCxxMode, compilerFamily)
+      ),
+      preferredFamily: compilerFamily,
+      msvcInstallationPath:
+        typeof toolPolicies?.cxx?.msvcInstallationPath === "string" &&
+        toolPolicies.cxx.msvcInstallationPath.trim().length > 0
+          ? toolPolicies.cxx.msvcInstallationPath.trim()
+          : undefined
+    }
+  };
+}
+
 function getVswherePath(): string {
-  const programFilesX86 = process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
-  return path.join(programFilesX86, "Microsoft Visual Studio", "Installer", "vswhere.exe");
+  return hostAdapter.getVsWherePath() ?? "";
 }
 
 async function runVsDevCmdAndCapture(devCmdPath: string, command: string): Promise<string> {
-  const scriptPath = path.join(os.tmpdir(), `cppx-msvc-${randomUUID()}.cmd`);
+  const scriptPath = path.join(
+    os.tmpdir(),
+    hostAdapter.getCommandScriptName(`cppx-msvc-${randomUUID()}`, "cmd")
+  );
   const scriptContent = [
     "@echo off",
     `call "${devCmdPath}" -arch=x64 -host_arch=x64 >nul`,
@@ -97,9 +250,10 @@ async function runVsDevCmdAndCapture(devCmdPath: string, command: string): Promi
 
   await fs.writeFile(scriptPath, scriptContent, "utf8");
   try {
+    const shellCommand = hostAdapter.getShellCommand("cmd");
     const { stdout } = await execFile(
-      "cmd.exe",
-      ["/d", "/c", scriptPath],
+      shellCommand.command,
+      [...shellCommand.args, scriptPath],
       { windowsHide: true, maxBuffer: 32 * 1024 * 1024 }
     );
     return stdout;
@@ -115,7 +269,7 @@ interface VswhereMsvcInstance {
 }
 
 function normalizePath(value: string): string {
-  return path.resolve(value).replace(/\//g, "\\").toLowerCase();
+  return hostAdapter.normalizePath(path.resolve(value));
 }
 
 function compareVersionDesc(a?: string, b?: string): number {
@@ -150,7 +304,7 @@ function inferMsvcInstallationPathFromCl(clPath: string): string | null {
 
 async function resolveVswhereMsvcInstances(): Promise<VswhereMsvcInstance[]> {
   const vswherePath = getVswherePath();
-  if (!(await pathExists(vswherePath))) {
+  if (!vswherePath || !(await pathExists(vswherePath))) {
     return [];
   }
 
@@ -220,7 +374,7 @@ async function resolveVswhereMsvcInstances(): Promise<VswhereMsvcInstance[]> {
     if (versionCompare !== 0) {
       return versionCompare;
     }
-    return normalizePath(left.installationPath).localeCompare(normalizePath(right.installationPath));
+    return hostAdapter.comparePaths(left.installationPath, right.installationPath);
   });
 }
 
@@ -228,7 +382,12 @@ async function resolveMsvcCompilerInfoFromInstance(
   instance: VswhereMsvcInstance
 ): Promise<MsvcCompilerInfo | null> {
   const installationPath = instance.installationPath;
-  const devCmdPath = path.join(installationPath, "Common7", "Tools", "VsDevCmd.bat");
+  const devCmdPath = path.join(
+    installationPath,
+    "Common7",
+    "Tools",
+    hostAdapter.getCommandScriptName("VsDevCmd", "bat")
+  );
   if (!(await pathExists(devCmdPath))) {
     return null;
   }
@@ -272,7 +431,7 @@ async function resolveAllMsvcCompilerInfos(): Promise<MsvcCompilerInfo[]> {
     if (versionCompare !== 0) {
       return versionCompare;
     }
-    return normalizePath(left.installationPath).localeCompare(normalizePath(right.installationPath));
+    return hostAdapter.comparePaths(left.installationPath, right.installationPath);
   });
 }
 
@@ -440,16 +599,17 @@ async function downloadFileWithRetry(
 }
 
 async function resolveLatestCxxSource(
+  policy: CompilerToolPolicy,
   logger: CppxLogger
 ): Promise<ArchiveToolSource> {
+  const entry = resolveToolCatalogEntry("cxx", policy.version, "mingw");
   logger.info("install-tools", "GitHub 릴리스에서 llvm-mingw 컴파일러 패키지 조회 중");
 
-  const response = await fetch(
-    "https://api.github.com/repos/mstorsjo/llvm-mingw/releases?per_page=20",
-    {
-      headers: GITHUB_API_HEADERS
-    }
-  );
+  if (!entry.repoUrl || !entry.assetPatterns || entry.assetPatterns.length === 0) {
+    throw new CppxError("llvm-mingw catalog 설정이 올바르지 않습니다.");
+  }
+
+  const response = await fetch(entry.repoUrl, { headers: GITHUB_API_HEADERS });
 
   if (!response.ok) {
     throw new CppxError(
@@ -464,13 +624,19 @@ async function resolveLatestCxxSource(
       continue;
     }
 
-    const preferredUcrt = release.assets.find((asset) =>
-      /^llvm-mingw-.*-ucrt-x86_64\.zip$/i.test(asset.name)
-    );
-    const fallbackMsvcrt = release.assets.find((asset) =>
-      /^llvm-mingw-.*-msvcrt-x86_64\.zip$/i.test(asset.name)
-    );
-    const selected = preferredUcrt ?? fallbackMsvcrt;
+    if (
+      policy.version !== "latest" &&
+      policy.version !== DEFAULT_TOOL_VERSION_TOKEN &&
+      sanitizeVersionToken(release.tag_name) !== sanitizeVersionToken(policy.version) &&
+      release.tag_name.trim() !== policy.version.trim()
+    ) {
+      continue;
+    }
+
+    const selected = entry.assetPatterns
+      .map((pattern) => new RegExp(pattern, "i"))
+      .map((pattern) => release.assets.find((asset) => pattern.test(asset.name)))
+      .find((asset) => asset !== undefined);
 
     if (selected) {
       logger.info(
@@ -480,7 +646,11 @@ async function resolveLatestCxxSource(
       return {
         version: sanitizeVersionToken(release.tag_name),
         urls: [selected.browser_download_url],
-        executable: "clang++.exe"
+        executable: entry.executable,
+        sourceKind: entry.sourceKind,
+        requestedVersion: policy.version,
+        catalogId: entry.id,
+        compilerFamily: "mingw"
       };
     }
   }
@@ -496,50 +666,151 @@ async function extractZip(
   logger: CppxLogger
 ): Promise<void> {
   await ensureDir(destination);
+  const extractCommand = hostAdapter.getArchiveExtractCommand(archivePath, destination);
   await runSpawn(
     {
       action: "install-tools",
-      command: "powershell",
-      args: [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        `Expand-Archive -Path '${archivePath}' -DestinationPath '${destination}' -Force`
-      ]
+      command: extractCommand.command,
+      args: extractCommand.args
     },
     logger
   );
 }
 
-async function registerTool(
-  tool: ToolName,
-  root: string,
-  executable: string,
-  version: string
-): Promise<void> {
+async function registerTool(record: ResolvedToolInfo): Promise<void> {
   await upsertToolRecord({
+    name: record.name,
+    executable: record.executable,
+    root: record.root,
+    version: record.version,
+    installedAt: new Date().toISOString(),
+    mode: record.mode,
+    sourceKind: record.sourceKind,
+    requestedVersion: record.requestedVersion,
+    resolvedVersion: record.resolvedVersion,
+    platform: hostAdapter.platform,
+    arch: getHostArchLabel(),
+    compilerFamily: record.compilerFamily,
+    catalogId: record.catalogId
+  });
+}
+
+async function resolveExecutableFromPath(candidates: string[]): Promise<string | null> {
+  for (const candidate of candidates) {
+    try {
+      const lookupCommand = hostAdapter.getExecutableLookupCommand(candidate);
+      const { stdout } = await execFile(lookupCommand.command, lookupCommand.args, {
+        windowsHide: true
+      });
+      const resolved = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+      if (resolved && (await pathExists(resolved))) {
+        return resolved;
+      }
+    } catch {
+      // Ignore missing candidates and continue.
+    }
+  }
+
+  return null;
+}
+
+async function resolveSystemTool(
+  tool: Exclude<ToolName, "cxx">,
+  policy: ToolPolicy
+): Promise<ResolvedToolInfo | null> {
+  const executable = await resolveExecutableFromPath(EXECUTABLE_CANDIDATES_BY_TOOL[tool]);
+  if (!executable) {
+    return null;
+  }
+
+  return {
     name: tool,
     executable,
-    root,
-    version,
-    installedAt: new Date().toISOString()
-  });
+    root: path.dirname(executable),
+    version: policy.version,
+    mode: "system",
+    sourceKind: "system-detected",
+    requestedVersion: policy.version,
+    resolvedVersion: policy.version
+  };
+}
+
+async function resolveSystemCompiler(
+  policy: CompilerToolPolicy
+): Promise<ResolvedToolInfo | null> {
+  if (policy.preferredFamily === "msvc") {
+    const msvc = await resolveMsvcCompilerInfo(policy.msvcInstallationPath);
+    if (!msvc) {
+      return null;
+    }
+
+    return {
+      name: "cxx",
+      executable: msvc.clPath,
+      root: msvc.installationPath,
+      version: msvc.version ?? policy.version,
+      mode: "system",
+      sourceKind: "msvc-detected",
+      requestedVersion: policy.version,
+      resolvedVersion: msvc.version ?? policy.version,
+      compilerFamily: "msvc"
+    };
+  }
+
+  const executable = await resolveExecutableFromPath(EXECUTABLE_CANDIDATES_BY_TOOL.cxx);
+  if (!executable) {
+    return null;
+  }
+
+  return {
+    name: "cxx",
+    executable,
+    root: path.dirname(executable),
+    version: policy.version,
+    mode: "system",
+    sourceKind: "system-detected",
+    requestedVersion: policy.version,
+    resolvedVersion: policy.version,
+    compilerFamily: inferCompilerFamily(executable)
+  };
 }
 
 async function installArchiveToolFromSource(
   tool: Exclude<ToolName, "vcpkg">,
   source: ArchiveToolSource,
   logger: CppxLogger
-): Promise<string> {
+): Promise<ResolvedToolInfo> {
   const toolRoot = getToolRoot(tool);
   await ensureDir(toolRoot);
+  const manifest = await readToolManifest();
+  const existingRecord = manifest.tools[tool];
 
   const existing = await findFileRecursive(toolRoot, source.executable);
   if (existing) {
-    logger.info("install-tools", `${tool} 이미 설치됨`);
-    await registerTool(tool, toolRoot, existing, source.version);
-    return existing;
+    if (shouldReuseManagedArchiveTool(existingRecord, source)) {
+      logger.info("install-tools", `${tool} 이미 설치됨`);
+      const record: ResolvedToolInfo = {
+        name: tool,
+        executable: existing,
+        root: toolRoot,
+        version: existingRecord?.resolvedVersion ?? existingRecord?.version ?? source.version,
+        mode: "managed",
+        sourceKind: existingRecord?.sourceKind ?? source.sourceKind,
+        requestedVersion: source.requestedVersion,
+        resolvedVersion: existingRecord?.resolvedVersion ?? existingRecord?.version ?? source.version,
+        compilerFamily: existingRecord?.compilerFamily ?? source.compilerFamily,
+        catalogId: existingRecord?.catalogId ?? source.catalogId
+      };
+      await registerTool(record);
+      return record;
+    }
+
+    logger.info("install-tools", `${tool} 버전 정책이 변경되어 기존 설치를 다시 배치합니다.`);
+    await fs.rm(toolRoot, { recursive: true, force: true });
+    await ensureDir(toolRoot);
   }
 
   const archivePath = path.join(
@@ -588,20 +859,52 @@ async function installArchiveToolFromSource(
     );
   }
 
-  await registerTool(tool, toolRoot, executable, source.version);
+  const record: ResolvedToolInfo = {
+    name: tool,
+    executable,
+    root: toolRoot,
+    version: source.version,
+    mode: "managed",
+    sourceKind: source.sourceKind,
+    requestedVersion: source.requestedVersion,
+    resolvedVersion: source.version,
+    compilerFamily: source.compilerFamily,
+    catalogId: source.catalogId
+  };
+  await registerTool(record);
   logger.success("install-tools", `${tool} 설치됨: ${executable}`);
-  return executable;
+  return record;
 }
 
 async function installStaticArchiveTool(
   tool: "cmake" | "ninja",
+  policy: ToolPolicy,
   logger: CppxLogger
-): Promise<string> {
-  return installArchiveToolFromSource(tool, STATIC_ARCHIVE_TOOL_SOURCES[tool], logger);
+): Promise<ResolvedToolInfo> {
+  const entry = resolveToolCatalogEntry(tool, policy.version);
+  return installArchiveToolFromSource(
+    tool,
+    {
+      version: entry.version ?? policy.version,
+      urls: entry.urls ?? [],
+      executable: entry.executable,
+      sourceKind: entry.sourceKind,
+      requestedVersion: policy.version,
+      catalogId: entry.id
+    },
+    logger
+  );
 }
 
-async function installCxxCompiler(logger: CppxLogger): Promise<string> {
-  const source = await resolveLatestCxxSource(logger);
+async function installCxxCompiler(
+  policy: CompilerToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
+  if (policy.preferredFamily === "msvc") {
+    throw new CppxError("MSVC는 system 모드로만 지원됩니다.");
+  }
+
+  const source = await resolveLatestCxxSource(policy, logger);
   return installArchiveToolFromSource("cxx", source, logger);
 }
 
@@ -613,13 +916,15 @@ function toMessage(error: unknown): string {
 }
 
 function inferCompilerFamily(executable: string): CompilerFamily {
-  return path.basename(executable).toLowerCase() === "cl.exe" ? "msvc" : "mingw";
+  return path.basename(executable).toLowerCase() === hostAdapter.getExecutableName("cl")
+    ? "msvc"
+    : "mingw";
 }
 
 async function installMsvcCompiler(
   logger: CppxLogger,
   preferredInstallationPath?: string
-): Promise<{ executable: string; baseEnv: NodeJS.ProcessEnv }> {
+): Promise<ResolvedToolInfo> {
   let msvc: MsvcCompilerInfo | null = null;
   try {
     msvc = await resolveMsvcCompilerInfo(preferredInstallationPath);
@@ -648,18 +953,31 @@ async function installMsvcCompiler(
   }
 
   const version = msvc.version?.trim() || "unknown";
-  await registerTool("cxx", msvc.installationPath, msvc.clPath, `msvc-${version}`);
-  logger.success("install-tools", `cxx 설치됨: ${msvc.clPath} (MSVC)`);
-  return {
+  const record: ResolvedToolInfo = {
+    name: "cxx",
     executable: msvc.clPath,
+    root: msvc.installationPath,
+    version: `msvc-${version}`,
+    mode: "system",
+    sourceKind: "msvc-detected",
+    requestedVersion: DEFAULT_TOOL_VERSION_TOKEN,
+    resolvedVersion: version,
+    compilerFamily: "msvc",
     baseEnv
   };
+  await registerTool(record);
+  logger.success("install-tools", `cxx 설치됨: ${msvc.clPath} (MSVC)`);
+  return record;
 }
 
-async function installVcpkg(logger: CppxLogger): Promise<string> {
+async function installVcpkg(
+  policy: ToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
   const tool = "vcpkg";
+  const entry = resolveToolCatalogEntry(tool, policy.version);
   const toolRoot = getToolRoot(tool);
-  const vcpkgExe = path.join(toolRoot, "vcpkg.exe");
+  const vcpkgExe = path.join(toolRoot, hostAdapter.getExecutableName("vcpkg"));
 
   await ensureDir(path.dirname(toolRoot));
 
@@ -685,7 +1003,7 @@ async function installVcpkg(logger: CppxLogger): Promise<string> {
             "clone",
             "--depth",
             "1",
-            "https://github.com/microsoft/vcpkg.git",
+            entry.repoUrl ?? "https://github.com/microsoft/vcpkg.git",
             toolRoot
           ]
         },
@@ -704,25 +1022,74 @@ async function installVcpkg(logger: CppxLogger): Promise<string> {
     );
   }
 
-  if (!(await pathExists(vcpkgExe))) {
+  if (
+    policy.version !== DEFAULT_TOOL_VERSION_TOKEN &&
+    policy.version !== "latest" &&
+    policy.version.trim().length > 0
+  ) {
     await runSpawn(
       {
         action: "install-tools",
-        command: "cmd.exe",
-        args: ["/d", "/s", "/c", "bootstrap-vcpkg.bat -disableMetrics"],
+        command: "git",
+        args: ["fetch", "--depth", "1", "origin", policy.version],
+        cwd: toolRoot
+      },
+      logger
+    );
+    await runSpawn(
+      {
+        action: "install-tools",
+        command: "git",
+        args: ["checkout", "--force", "FETCH_HEAD"],
         cwd: toolRoot
       },
       logger
     );
   }
 
+  await fs.rm(vcpkgExe, { force: true });
+  const bootstrapCommand = hostAdapter.getVcpkgBootstrapCommand(toolRoot);
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: bootstrapCommand.command,
+      args: bootstrapCommand.args,
+      cwd: toolRoot
+    },
+    logger
+  );
+
   if (!(await pathExists(vcpkgExe))) {
-    throw new CppxError("vcpkg bootstrap이 끝났지만 vcpkg.exe를 찾지 못했습니다");
+    throw new CppxError(
+      `vcpkg bootstrap이 끝났지만 ${hostAdapter.getExecutableName("vcpkg")}를 찾지 못했습니다`
+    );
   }
 
-  await registerTool("vcpkg", toolRoot, vcpkgExe, "rolling");
+  let resolvedVersion = entry.version ?? policy.version;
+  try {
+    const { stdout } = await execFile("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: toolRoot,
+      windowsHide: true
+    });
+    resolvedVersion = stdout.trim() || resolvedVersion;
+  } catch {
+    // Keep the policy version when git metadata is unavailable.
+  }
+
+  const record: ResolvedToolInfo = {
+    name: "vcpkg",
+    executable: vcpkgExe,
+    root: toolRoot,
+    version: resolvedVersion,
+    mode: "managed",
+    sourceKind: entry.sourceKind,
+    requestedVersion: policy.version,
+    resolvedVersion,
+    catalogId: entry.id
+  };
+  await registerTool(record);
   logger.success("install-tools", `vcpkg 설치됨: ${vcpkgExe}`);
-  return vcpkgExe;
+  return record;
 }
 
 function formatInstallError(tool: ToolName, error: unknown): string {
@@ -777,58 +1144,84 @@ async function cleanupDownloadsCache(logger: CppxLogger): Promise<void> {
 
 export async function installAllTools(
   logger: CppxLogger,
-  compilerPreference: CompilerPreference = "mingw",
-  msvcInstallationPath?: string
+  toolPolicies?: ProjectToolPoliciesPayload,
+  dependencyBackend: DependencyBackend = hostAdapter.getDefaultDependencyBackend()
 ): Promise<Toolchain> {
   await ensureCppxLayout();
 
-  let cmake: string | undefined;
-  let ninja: string | undefined;
-  let vcpkg: string | undefined;
-  let cxx: string | undefined;
-  let compilerFamily: CompilerFamily = "mingw";
-  let baseEnv: NodeJS.ProcessEnv | undefined;
+  const policies = resolveRequestedPolicies(toolPolicies);
+  let cmake: ResolvedToolInfo | undefined;
+  let ninja: ResolvedToolInfo | undefined;
+  let vcpkg: ResolvedToolInfo | undefined;
+  let cxx: ResolvedToolInfo | undefined;
   const errors: string[] = [];
 
   try {
-    cmake = await installStaticArchiveTool("cmake", logger);
+    if (policies.cmake.mode === "system") {
+      cmake = await resolveSystemTool("cmake", policies.cmake) ?? undefined;
+      if (!cmake) {
+        throw new CppxError("cmake system 실행 파일을 찾지 못했습니다.");
+      }
+      await registerTool(cmake);
+    } else {
+      cmake = await installStaticArchiveTool("cmake", policies.cmake, logger);
+    }
   } catch (error) {
     errors.push(formatInstallError("cmake", error));
   }
 
   try {
-    ninja = await installStaticArchiveTool("ninja", logger);
+    if (policies.ninja.mode === "system") {
+      ninja = await resolveSystemTool("ninja", policies.ninja) ?? undefined;
+      if (!ninja) {
+        throw new CppxError("ninja system 실행 파일을 찾지 못했습니다.");
+      }
+      await registerTool(ninja);
+    } else {
+      ninja = await installStaticArchiveTool("ninja", policies.ninja, logger);
+    }
   } catch (error) {
     errors.push(formatInstallError("ninja", error));
   }
 
+  if (dependencyBackend === "vcpkg") {
+    try {
+      if (policies.vcpkg.mode === "system") {
+        vcpkg = await resolveSystemTool("vcpkg", policies.vcpkg) ?? undefined;
+        if (!vcpkg) {
+          throw new CppxError("vcpkg system 실행 파일을 찾지 못했습니다.");
+        }
+        await registerTool(vcpkg);
+      } else {
+        vcpkg = await installVcpkg(policies.vcpkg, logger);
+      }
+    } catch (error) {
+      errors.push(formatInstallError("vcpkg", error));
+    }
+  }
+
   try {
-    vcpkg = await installVcpkg(logger);
+    if (policies.cxx.mode === "system") {
+      if (policies.cxx.preferredFamily === "msvc") {
+        logger.info("install-tools", "MSVC 컴파일러 사용을 시도합니다.");
+        cxx = await installMsvcCompiler(logger, policies.cxx.msvcInstallationPath);
+      } else {
+        logger.info("install-tools", "system C++ 컴파일러를 탐색합니다.");
+        cxx = await resolveSystemCompiler(policies.cxx) ?? undefined;
+        if (!cxx) {
+          throw new CppxError("system C++ 컴파일러를 찾지 못했습니다.");
+        }
+        await registerTool(cxx);
+      }
+    } else {
+      logger.info("install-tools", "llvm-mingw 기반 C++ 컴파일러를 설치합니다.");
+      cxx = await installCxxCompiler(policies.cxx, logger);
+    }
   } catch (error) {
-    errors.push(formatInstallError("vcpkg", error));
+    errors.push(formatInstallError("cxx", error));
   }
 
-  if (compilerPreference === "msvc") {
-    logger.info("install-tools", "MSVC 컴파일러 사용을 시도합니다.");
-    try {
-      const installed = await installMsvcCompiler(logger, msvcInstallationPath);
-      cxx = installed.executable;
-      baseEnv = installed.baseEnv;
-      compilerFamily = "msvc";
-    } catch (error) {
-      errors.push(formatInstallError("cxx", error));
-    }
-  } else {
-    logger.info("install-tools", "llvm-mingw 기반 C++ 컴파일러를 설치합니다.");
-    try {
-      cxx = await installCxxCompiler(logger);
-      compilerFamily = "mingw";
-    } catch (error) {
-      errors.push(formatInstallError("cxx", error));
-    }
-  }
-
-  if (!cmake || !ninja || !vcpkg || !cxx) {
+  if (!cmake || !ninja || (dependencyBackend === "vcpkg" && !vcpkg) || !cxx) {
     const details =
       errors.length > 0
         ? errors.join(" | ")
@@ -838,27 +1231,81 @@ export async function installAllTools(
 
   const envPath = Array.from(
     new Set([
-      path.dirname(cmake),
-      path.dirname(ninja),
-      path.dirname(vcpkg),
-      path.dirname(cxx)
+      path.dirname(cmake.executable),
+      path.dirname(ninja.executable),
+      ...(vcpkg ? [path.dirname(vcpkg.executable)] : []),
+      path.dirname(cxx.executable)
     ])
   );
 
   await cleanupDownloadsCache(logger);
 
-  return { cmake, ninja, vcpkg, cxx, envPath, compilerFamily, baseEnv };
+  return {
+    cmake: cmake.executable,
+    ninja: ninja.executable,
+    vcpkg: vcpkg?.executable,
+    cxx: cxx.executable,
+    envPath,
+    compilerFamily: cxx.compilerFamily ?? inferCompilerFamily(cxx.executable),
+    baseEnv: cxx.baseEnv
+  };
 }
 
-async function resolveToolExecutable(tool: ToolName): Promise<string | null> {
-  const manifest = await readToolManifest();
-  const recordedExecutable = manifest.tools[tool]?.executable;
+function buildResolvedExecutable(
+  executable: string,
+  root: string,
+  record: ToolRecord | undefined,
+  fallback: {
+    mode: "managed" | "system";
+    sourceKind: ToolSourceKind;
+    requestedVersion?: string;
+    resolvedVersion?: string;
+    compilerFamily?: CompilerFamily;
+    catalogId?: string;
+  }
+): ResolvedToolExecutable {
+  return {
+    executable,
+    root,
+    record,
+    mode: record?.mode ?? fallback.mode,
+    sourceKind: record?.sourceKind ?? fallback.sourceKind,
+    requestedVersion: record?.requestedVersion ?? fallback.requestedVersion,
+    resolvedVersion: record?.resolvedVersion ?? record?.version ?? fallback.resolvedVersion,
+    compilerFamily: record?.compilerFamily ?? fallback.compilerFamily,
+    catalogId: record?.catalogId ?? fallback.catalogId
+  };
+}
+
+function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
+  if (tool === "vcpkg") {
+    return "catalog-git";
+  }
+  if (tool === "cxx") {
+    return "catalog-github-release";
+  }
+  return "catalog-archive";
+}
+
+async function resolveManagedToolExecutable(
+  tool: ToolName,
+  manifest: Awaited<ReturnType<typeof readToolManifest>>,
+  policy?: ToolPolicy | CompilerToolPolicy
+): Promise<ResolvedToolExecutable | null> {
+  const record = manifest.tools[tool];
   if (
-    typeof recordedExecutable === "string" &&
-    recordedExecutable.trim().length > 0 &&
-    (await pathExists(recordedExecutable))
+    record &&
+    (record.mode ?? "managed") === "managed" &&
+    typeof record.executable === "string" &&
+    record.executable.trim().length > 0 &&
+    (await pathExists(record.executable))
   ) {
-    return recordedExecutable;
+    return buildResolvedExecutable(record.executable, record.root, record, {
+      mode: "managed",
+      sourceKind: getManagedFallbackSourceKind(tool),
+      requestedVersion: policy?.version,
+      resolvedVersion: record.version
+    });
   }
 
   const toolRoot = getToolRoot(tool);
@@ -866,71 +1313,180 @@ async function resolveToolExecutable(tool: ToolName): Promise<string | null> {
     return null;
   }
 
-  const candidates = EXECUTABLE_CANDIDATES_BY_TOOL[tool];
-  for (const candidate of candidates) {
+  for (const candidate of EXECUTABLE_CANDIDATES_BY_TOOL[tool]) {
     const found = await findFileRecursive(toolRoot, candidate);
     if (found) {
-      return found;
+      return buildResolvedExecutable(found, record?.root ?? toolRoot, record, {
+        mode: "managed",
+        sourceKind: getManagedFallbackSourceKind(tool),
+        requestedVersion: policy?.version,
+        resolvedVersion: record?.version ?? policy?.version
+      });
     }
   }
 
   return null;
 }
 
+async function resolveSystemToolExecutable(
+  tool: ToolName,
+  manifest: Awaited<ReturnType<typeof readToolManifest>>,
+  policy?: ToolPolicy | CompilerToolPolicy
+): Promise<ResolvedToolExecutable | null> {
+  const record = manifest.tools[tool];
+  if (
+    record &&
+    (record.mode ?? "managed") === "system" &&
+    typeof record.executable === "string" &&
+    record.executable.trim().length > 0 &&
+    (await pathExists(record.executable))
+  ) {
+    return buildResolvedExecutable(record.executable, record.root, record, {
+      mode: "system",
+      sourceKind: tool === "cxx" ? "msvc-detected" : "system-detected",
+      requestedVersion: policy?.version,
+      resolvedVersion: record.version,
+      compilerFamily: record.compilerFamily
+    });
+  }
+
+  if (tool === "cxx") {
+    const compiler = await resolveSystemCompiler(
+      (policy as CompilerToolPolicy | undefined) ?? resolveRequestedPolicies().cxx
+    );
+    if (!compiler) {
+      return null;
+    }
+    return buildResolvedExecutable(compiler.executable, compiler.root, undefined, compiler);
+  }
+
+  const systemTool = await resolveSystemTool(
+    tool,
+    (policy as ToolPolicy | undefined) ?? { mode: "system", version: DEFAULT_TOOL_VERSION_TOKEN }
+  );
+  if (!systemTool) {
+    return null;
+  }
+  return buildResolvedExecutable(systemTool.executable, systemTool.root, undefined, systemTool);
+}
+
+async function resolveToolExecutable(
+  tool: ToolName,
+  manifest: Awaited<ReturnType<typeof readToolManifest>>,
+  policy?: ToolPolicy | CompilerToolPolicy
+): Promise<ResolvedToolExecutable | null> {
+  if (policy?.mode === "system") {
+    return resolveSystemToolExecutable(tool, manifest, policy);
+  }
+
+  if (policy?.mode === "managed") {
+    return resolveManagedToolExecutable(tool, manifest, policy);
+  }
+
+  const recorded = manifest.tools[tool];
+  if (
+    recorded &&
+    typeof recorded.executable === "string" &&
+    recorded.executable.trim().length > 0 &&
+    (await pathExists(recorded.executable))
+  ) {
+    return buildResolvedExecutable(recorded.executable, recorded.root, recorded, {
+      mode: recorded.mode ?? "managed",
+      sourceKind: recorded.sourceKind ?? getManagedFallbackSourceKind(tool),
+      requestedVersion: recorded.requestedVersion,
+      resolvedVersion: recorded.resolvedVersion ?? recorded.version,
+      compilerFamily: recorded.compilerFamily,
+      catalogId: recorded.catalogId
+    });
+  }
+
+  return resolveManagedToolExecutable(tool, manifest, policy);
+}
+
+function toStatusDetail(
+  resolved: ResolvedToolExecutable | null
+): NonNullable<ToolStatus["details"]>[ToolName] {
+  if (!resolved) {
+    return { ready: false };
+  }
+
+  return {
+    ready: true,
+    mode: resolved.mode,
+    sourceKind: resolved.sourceKind,
+    requestedVersion: resolved.requestedVersion,
+    resolvedVersion: resolved.resolvedVersion,
+    executable: resolved.executable
+  };
+}
+
 export async function getToolStatus(): Promise<ToolStatus> {
   await ensureCppxLayout();
+  const manifest = await readToolManifest();
 
   const [cmake, ninja, vcpkg, cxx] = await Promise.all([
-    resolveToolExecutable("cmake"),
-    resolveToolExecutable("ninja"),
-    resolveToolExecutable("vcpkg"),
-    resolveToolExecutable("cxx")
+    resolveToolExecutable("cmake", manifest),
+    resolveToolExecutable("ninja", manifest),
+    resolveToolExecutable("vcpkg", manifest),
+    resolveToolExecutable("cxx", manifest)
   ]);
 
   return {
     cmake: Boolean(cmake),
     ninja: Boolean(ninja),
     vcpkg: Boolean(vcpkg),
-    cxx: Boolean(cxx)
+    cxx: Boolean(cxx),
+    details: {
+      cmake: toStatusDetail(cmake),
+      ninja: toStatusDetail(ninja),
+      vcpkg: toStatusDetail(vcpkg),
+      cxx: toStatusDetail(cxx)
+    }
   };
 }
 
 export async function resolveToolchainOrThrow(
-  logger: CppxLogger
+  logger: CppxLogger,
+  toolPolicies?: ProjectToolPoliciesPayload,
+  dependencyBackend: DependencyBackend = hostAdapter.getDefaultDependencyBackend()
 ): Promise<Toolchain> {
   await ensureCppxLayout();
   const manifest = await readToolManifest();
+  const policies = resolveRequestedPolicies(toolPolicies);
 
   const [cmake, ninja, vcpkg, cxxResolved] = await Promise.all([
-    resolveToolExecutable("cmake"),
-    resolveToolExecutable("ninja"),
-    resolveToolExecutable("vcpkg"),
-    resolveToolExecutable("cxx")
+    resolveToolExecutable("cmake", manifest, policies.cmake),
+    resolveToolExecutable("ninja", manifest, policies.ninja),
+    resolveToolExecutable("vcpkg", manifest, policies.vcpkg),
+    resolveToolExecutable("cxx", manifest, policies.cxx)
   ]);
 
   const missing: string[] = [];
   if (!cmake) missing.push("cmake");
   if (!ninja) missing.push("ninja");
-  if (!vcpkg) missing.push("vcpkg");
+  if (dependencyBackend === "vcpkg" && !vcpkg) missing.push("vcpkg");
   if (!cxxResolved) missing.push("cxx-compiler");
 
   if (missing.length > 0) {
     throw new CppxError(
-      `누락된 도구: ${missing.join(", ")}. 먼저 install-tools를 실행하세요.`
+      `누락된 도구: ${missing.join(", ")}. 먼저 install-tools를 실행하거나 시스템 PATH를 확인하세요.`
     );
   }
 
-  if (!cmake || !ninja || !vcpkg || !cxxResolved) {
+  if (!cmake || !ninja || !cxxResolved || (dependencyBackend === "vcpkg" && !vcpkg)) {
     throw new CppxError("도구 확인 중 예기치 않은 오류가 발생했습니다.");
   }
 
-  let cxx = cxxResolved;
-  let compilerFamily = inferCompilerFamily(cxxResolved);
+  let cxx = cxxResolved.executable;
+  let compilerFamily = cxxResolved.compilerFamily ?? inferCompilerFamily(cxxResolved.executable);
   let baseEnv: NodeJS.ProcessEnv | undefined;
 
   if (compilerFamily === "msvc") {
     const preferredInstallationPath =
-      manifest.tools.cxx?.root ?? inferMsvcInstallationPathFromCl(cxxResolved) ?? undefined;
+      policies.cxx.msvcInstallationPath ??
+      manifest.tools.cxx?.root ??
+      inferMsvcInstallationPathFromCl(cxxResolved.executable) ??
+      undefined;
     let msvc: MsvcCompilerInfo | null = null;
     try {
       msvc = await resolveMsvcCompilerInfo(preferredInstallationPath);
@@ -956,15 +1512,25 @@ export async function resolveToolchainOrThrow(
 
   const envPath = Array.from(
     new Set([
-      path.dirname(cmake),
-      path.dirname(ninja),
-      path.dirname(vcpkg),
+      path.dirname(cmake.executable),
+      path.dirname(ninja.executable),
+      ...(vcpkg ? [path.dirname(vcpkg.executable)] : []),
       path.dirname(cxx)
     ])
   );
 
-  logger.info("system", `사용 중인 toolchain 루트: ${path.dirname(vcpkg)}`);
-  return { cmake, ninja, vcpkg, cxx, envPath, compilerFamily, baseEnv };
+  if (vcpkg) {
+    logger.info("system", `사용 중인 toolchain 루트: ${path.dirname(vcpkg.executable)}`);
+  }
+  return {
+    cmake: cmake.executable,
+    ninja: ninja.executable,
+    vcpkg: vcpkg?.executable,
+    cxx,
+    envPath,
+    compilerFamily,
+    baseEnv
+  };
 }
 
 
