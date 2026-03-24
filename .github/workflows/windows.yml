@@ -62,7 +62,36 @@ jobs:
         run: npm run cppx -- install-tools --compiler msvc
 
       - name: Native smoke
-        run: npm run smoke:ci
+        shell: pwsh
+        run: |
+          function Format-GitHubAnnotation([string]$value) {
+            return $value.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+          }
+
+          if ($env:RUNNER_OS -eq 'Windows') {
+            where.exe cmake
+            where.exe ninja
+            & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+              -products * `
+              -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              -latest `
+              -property installationPath
+          }
+
+          $output = & node ./scripts/run-smoke-ci.mjs 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | ForEach-Object { $_ }
+
+          if ($exitCode -ne 0) {
+            $tail = (
+              $output |
+              ForEach-Object { $_.ToString() } |
+              Where-Object { $_.Trim().Length -gt 0 } |
+              Select-Object -Last 120
+            ) -join "`n"
+            Write-Host "::error title=Native smoke failure::$(Format-GitHubAnnotation($tail))"
+            exit $exitCode
+          }
 
       - name: Windows managed smoke
         if: runner.os == 'Windows'
