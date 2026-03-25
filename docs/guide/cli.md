@@ -123,7 +123,7 @@ npm run cppx -- status ./myapp
 
 - 설치 모드: `managed` 또는 `system`
 - 해석된 버전
-- 소스 종류: `catalog-archive`, `catalog-git`, `catalog-github-release`, `system-detected`, `msvc-detected`
+- 소스 종류: `catalog-archive`, `catalog-github-release`, `system-detected`, `msvc-detected`
 - 검증된 SHA-256 일부
 - 실행 파일 경로
 

@@ -153,7 +153,7 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기` / `config 저장` 
 
 `init`은 `--backend <vcpkg|conan|none>`를 지원하므로 처음부터 의존성 방식을 명시할 수 있습니다.
 `install-tools`는 `--compiler <mingw|msvc>`와 `--msvc-installation-path <path>`를 지원합니다.
-관리형 `vcpkg`의 `default`는 catalog가 고정한 release tag를 사용하고, `latest`만 현재 원격 HEAD를 따라갑니다. exact 버전은 신뢰된 release tag 또는 commit ref만 허용합니다.
+관리형 `vcpkg`는 catalog에 등록된 검증된 release archive만 사용합니다. `default`와 `latest`는 최신 catalog 항목을 가리키고, exact 버전도 catalog에 등록된 버전만 허용합니다.
 `status [workspace]`는 가능한 경우 `managed/system`, 해석된 버전, 소스 종류, 검증된 SHA-256 일부, 실행 파일 경로와 workspace 힌트를 함께 표시합니다.
 `doctor [workspace]`는 blocker와 warning을 구분해서 보여 주고, 특히 `dependency_backend = "none"`에서 왜 `cppx add`가 비활성화되는지 설명합니다.
 

@@ -6,10 +6,6 @@ export const DEFAULT_TOOL_VERSION_TOKEN = "default";
 export const LATEST_TOOL_VERSION_TOKEN = "latest";
 
 const hostAdapter = getHostAdapter();
-const TRUSTED_VCPKG_REF_PATTERNS = [
-  "^\\d{4}\\.\\d{2}\\.\\d{2}(?:\\.\\d+)?$",
-  "^[0-9a-fA-F]{7,40}$"
-];
 
 const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
   {
@@ -42,11 +38,28 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     tool: "vcpkg",
     platform: "win32",
     arch: "x64",
-    sourceKind: "catalog-git",
+    sourceKind: "catalog-archive",
     executable: hostAdapter.getExecutableName("vcpkg"),
     version: "2026.03.18",
-    repoUrl: "https://github.com/microsoft/vcpkg.git",
-    trustedRefPatterns: TRUSTED_VCPKG_REF_PATTERNS
+    sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.03.18",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.03.18.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.02.27-windows-x64",
+    tool: "vcpkg",
+    platform: "win32",
+    arch: "x64",
+    sourceKind: "catalog-archive",
+    executable: hostAdapter.getExecutableName("vcpkg"),
+    version: "2026.02.27",
+    sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
+    ]
   },
   {
     id: "llvm-mingw-latest-windows-x64",
@@ -97,24 +110,6 @@ export function getToolCatalogEntries(
     .sort((left, right) => compareVersionDesc(left.version, right.version));
 }
 
-export function isTrustedCatalogGitRef(entry: ToolCatalogEntry, ref: string): boolean {
-  if (entry.sourceKind !== "catalog-git") {
-    return false;
-  }
-
-  const normalizedRef = ref.trim();
-  if (normalizedRef.length === 0) {
-    return false;
-  }
-
-  const patterns = entry.trustedRefPatterns ?? [];
-  if (patterns.length === 0) {
-    return true;
-  }
-
-  return patterns.some((pattern) => new RegExp(pattern).test(normalizedRef));
-}
-
 export function resolveToolCatalogEntry(
   tool: ToolName,
   version: string,
@@ -140,20 +135,6 @@ export function resolveToolCatalogEntry(
     return exact;
   }
 
-  if (tool === "vcpkg") {
-    if (!isTrustedCatalogGitRef(fallback, normalizedVersion)) {
-      throw new CppxError(
-        "vcpkg exact version은 신뢰된 tag 또는 commit ref만 지원합니다.",
-        `requested=${normalizedVersion}`
-      );
-    }
-
-    return {
-      ...fallback,
-      version: normalizedVersion
-    };
-  }
-
   if (tool === "cxx") {
     return {
       ...fallback,
@@ -162,7 +143,7 @@ export function resolveToolCatalogEntry(
   }
 
   throw new CppxError(
-    `${tool} exact version 정책을 현재 catalog가 지원하지 않습니다.`,
+    `${tool} exact version은 현재 catalog에 등록된 버전만 지원합니다.`,
     `requested=${normalizedVersion}`
   );
 }

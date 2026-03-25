@@ -78,7 +78,7 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
       assert.equal(status.vcpkg, true);
       assert.equal(status.cxx, true);
       assert.equal(status.details?.cmake?.mode, "managed");
-      assert.equal(status.details?.vcpkg?.sourceKind, "catalog-git");
+      assert.equal(status.details?.vcpkg?.sourceKind, "catalog-archive");
       assert.equal(status.details?.cmake?.executable, cmake);
 
       const { logger } = createLogger();
