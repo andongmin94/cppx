@@ -20,14 +20,15 @@ test("paths.ts derives cppx layout from the active host and persists the tool ma
     process.platform === "darwin"
       ? path.join(hostRoot, "Library", "Application Support")
       : hostRoot;
-  const cmakeExecutable = path.join(
-    getToolRoot("cmake"),
-    "bin",
-    hostAdapter.getExecutableName("cmake")
-  );
 
   try {
     await withHostDataRoot(hostRoot, async () => {
+      const cmakeExecutable = path.join(
+        getToolRoot("cmake"),
+        "bin",
+        hostAdapter.getExecutableName("cmake")
+      );
+
       assert.equal(getCppxRoot(), path.join(appDataRoot, "cppx"));
       assert.equal(getDownloadsRoot(), path.join(appDataRoot, "cppx", "downloads"));
       assert.equal(getToolRoot("cmake"), path.join(appDataRoot, "cppx", "cmake"));
