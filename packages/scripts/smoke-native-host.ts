@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { resolveToolchainOrThrow } from "../src/main/cppx/installers";
+import { installAllTools, resolveToolchainOrThrow } from "../src/main/cppx/installers";
 import { CppxLogger } from "../src/main/cppx/logger";
 import {
   buildWithPreset,
@@ -73,19 +73,19 @@ async function main(): Promise<void> {
           version: toolMode === "managed" ? "latest" : "latest",
           preferredFamily: "mingw" as const
         };
+  const toolPolicies = {
+    cmake: toolPolicy,
+    ninja: toolPolicy,
+    vcpkg: toolPolicy,
+    conan: toolPolicy,
+    cxx: cxxPolicy
+  };
 
   try {
-    const toolchain = await resolveToolchainOrThrow(
-      logger,
-      {
-        cmake: toolPolicy,
-        ninja: toolPolicy,
-        vcpkg: toolPolicy,
-        conan: toolPolicy,
-        cxx: cxxPolicy
-      },
-      dependencyBackend
-    );
+    const toolchain =
+      toolMode === "managed"
+        ? await installAllTools(logger, toolPolicies, dependencyBackend)
+        : await resolveToolchainOrThrow(logger, toolPolicies, dependencyBackend);
     const initToolchain = createInitToolchain(workspace, toolchain);
 
     await initProject(workspace, "smoke-app", initToolchain, logger);
@@ -95,11 +95,7 @@ async function main(): Promise<void> {
       ...current,
       dependencyBackend,
       tools: {
-        cmake: toolPolicy,
-        ninja: toolPolicy,
-        vcpkg: toolPolicy,
-        conan: toolPolicy,
-        cxx: cxxPolicy
+        ...toolPolicies
       }
     });
     const activeToolchain = await resolveToolchainOrThrow(
