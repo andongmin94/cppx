@@ -217,6 +217,10 @@ test("syncProjectFiles preserves user vscode entries while replacing cppx-manage
 
   try {
     await initProject(workspace, "merge-app", createToolchain(), logger);
+    const current = await loadProjectConfig(workspace);
+    const currentPresets = current.presets ?? [];
+    const debugPreset = currentPresets[0]?.name ?? current.defaultPreset;
+    const debugDisplayName = currentPresets[0]?.displayName ?? debugPreset;
 
     await writeJson(path.join(workspace, ".vscode", "tasks.json"), {
       version: "2.0.0",
@@ -228,7 +232,7 @@ test("syncProjectFiles preserves user vscode entries while replacing cppx-manage
           command: "npm run lint"
         },
         {
-          label: "cppx: build debug-x64",
+          label: `cppx: build ${debugPreset}`,
           type: "shell",
           command: "echo stale"
         }
@@ -245,7 +249,7 @@ test("syncProjectFiles preserves user vscode entries while replacing cppx-manage
           program: "custom.exe"
         },
         {
-          name: "cppx: Launch Debug x64",
+          name: `cppx: Launch ${debugDisplayName}`,
           type: "cppdbg",
           request: "launch",
           program: "stale.exe"
@@ -261,8 +265,8 @@ test("syncProjectFiles preserves user vscode entries while replacing cppx-manage
     }>(path.join(workspace, ".vscode", "tasks.json"));
     assert.equal(tasks.inputs?.[0]?.id, "userInput");
     assert.ok(tasks.tasks.some((task) => task.label === "user: lint" && task.command === "npm run lint"));
-    const managedBuild = tasks.tasks.find((task) => task.label === "cppx: build debug-x64");
-    assert.equal(managedBuild?.command, "cmake --build --preset debug-x64");
+    const managedBuild = tasks.tasks.find((task) => task.label === `cppx: build ${debugPreset}`);
+    assert.equal(managedBuild?.command, `cmake --build --preset ${debugPreset}`);
     assert.equal(managedBuild?.options?.cwd, "${workspaceFolder}/build/.cppx");
 
     const launch = await readJson<{
@@ -277,7 +281,7 @@ test("syncProjectFiles preserves user vscode entries while replacing cppx-manage
       )
     );
     const managedLaunch = launch.configurations.find(
-      (configuration) => configuration.name === "cppx: Launch Debug x64"
+      (configuration) => configuration.name === `cppx: Launch ${debugDisplayName}`
     );
     assert.ok(managedLaunch);
     assert.notEqual(managedLaunch?.program, "stale.exe");
