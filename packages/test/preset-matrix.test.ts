@@ -140,12 +140,6 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
         name: string;
         configurePreset: string;
         generators: string[];
-        output?: {
-          packageName?: string;
-          packageVersion?: string;
-          vendorName?: string;
-          packageDirectory?: string;
-        };
       }>;
     }>(path.join(generatedRoot(workspace), "CMakePresets.json"));
 
@@ -166,10 +160,6 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
       ["asan-x64", "release-lto", "arm64-release"]
     );
     assert.deepEqual(presets.packagePresets[0]?.generators, ["ZIP"]);
-    assert.equal(presets.packagePresets[0]?.output?.packageName, "matrix-app");
-    assert.equal(presets.packagePresets[0]?.output?.vendorName, "matrix-app");
-    assert.equal(presets.packagePresets[0]?.output?.packageVersion, "0.1.0");
-    assert.match(presets.packagePresets[0]?.output?.packageDirectory ?? "", /dist$/);
     assert.equal(presets.configurePresets[0]?.displayName, "ASan x64");
     assert.equal(
       presets.configurePresets[2]?.cacheVariables.VCPKG_TARGET_TRIPLET,

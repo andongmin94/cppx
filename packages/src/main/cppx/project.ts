@@ -189,13 +189,7 @@ function createGeneratedPresets(
     packagePresets: presets.map((preset) => ({
       name: preset.name,
       configurePreset: preset.name,
-      generators: config.package.generators,
-      output: {
-        packageName: config.name,
-        packageVersion: config.package.version,
-        vendorName: config.package.vendor,
-        packageDirectory: `\${sourceDir}/${getGeneratedSourceRelativePath(config.package.outputDir)}`
-      }
+      generators: config.package.generators
     }))
   };
 }

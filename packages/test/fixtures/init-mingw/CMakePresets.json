@@ -81,26 +81,14 @@
       "configurePreset": "debug-x64",
       "generators": [
         "ZIP"
-      ],
-      "output": {
-        "packageName": "sample-app",
-        "packageVersion": "0.1.0",
-        "vendorName": "sample-app",
-        "packageDirectory": "${sourceDir}/../../dist"
-      }
+      ]
     },
     {
       "name": "release-x64",
       "configurePreset": "release-x64",
       "generators": [
         "ZIP"
-      ],
-      "output": {
-        "packageName": "sample-app",
-        "packageVersion": "0.1.0",
-        "vendorName": "sample-app",
-        "packageDirectory": "${sourceDir}/../../dist"
-      }
+      ]
     }
   ]
 }
