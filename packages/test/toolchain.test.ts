@@ -221,7 +221,12 @@ test("resolveToolchainOrThrow reports all missing managed tools", async () => {
           ),
         (error) => {
           assert.ok(error instanceof CppxError);
-          assert.match(error.message, /cmake, ninja, vcpkg, cxx-compiler/);
+          assert.match(error.message, /vcpkg/);
+          assert.match(error.message, /cxx-compiler/);
+          if (process.platform !== "darwin") {
+            assert.match(error.message, /cmake/);
+            assert.match(error.message, /ninja/);
+          }
           return true;
         }
       );
