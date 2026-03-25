@@ -145,7 +145,7 @@ test("tool status details can represent managed and system metadata", async () =
   );
 });
 
-test("exact version archive installs do not reuse a mismatched existing manifest", () => {
+test("managed archive installs only reuse matching manifest metadata", () => {
   assert.equal(isPinnedToolVersion("3.30.5"), true);
   assert.equal(isPinnedToolVersion("default"), false);
   assert.equal(isPinnedToolVersion("latest"), false);
@@ -168,7 +168,7 @@ test("exact version archive installs do not reuse a mismatched existing manifest
         sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         executable: "cmake.exe",
         sourceKind: "catalog-archive",
-        requestedVersion: "3.30.5",
+        requestedVersion: "default",
         catalogId: "cmake-3.30.5-windows-x64"
       }
     ),
@@ -195,6 +195,58 @@ test("exact version archive installs do not reuse a mismatched existing manifest
         executable: "cmake.exe",
         sourceKind: "catalog-archive",
         requestedVersion: "3.30.5",
+        catalogId: "cmake-3.30.5-windows-x64"
+      }
+    ),
+    true
+  );
+
+  assert.equal(
+    shouldReuseManagedArchiveTool(
+      {
+        ...createRichToolRecord({
+          mode: "managed",
+          sourceKind: "catalog-archive",
+          requestedVersion: "latest",
+          resolvedVersion: "3.29.0",
+          catalogId: "cmake-3.29.0-windows-x64",
+          verifiedSha256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }),
+        version: "3.29.0"
+      },
+      {
+        version: "3.30.5",
+        urls: ["https://example.com/cmake.zip"],
+        sha256: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        executable: "cmake.exe",
+        sourceKind: "catalog-archive",
+        requestedVersion: "latest",
+        catalogId: "cmake-3.30.5-windows-x64"
+      }
+    ),
+    false
+  );
+
+  assert.equal(
+    shouldReuseManagedArchiveTool(
+      {
+        ...createRichToolRecord({
+          mode: "managed",
+          sourceKind: "catalog-archive",
+          requestedVersion: "default",
+          resolvedVersion: "3.30.5",
+          catalogId: "cmake-3.30.5-windows-x64",
+          verifiedSha256: "1111111111111111111111111111111111111111111111111111111111111111"
+        }),
+        version: "3.30.5"
+      },
+      {
+        version: "3.30.5",
+        urls: ["https://example.com/cmake.zip"],
+        sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+        executable: "cmake.exe",
+        sourceKind: "catalog-archive",
+        requestedVersion: "default",
         catalogId: "cmake-3.30.5-windows-x64"
       }
     ),

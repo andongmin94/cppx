@@ -243,10 +243,6 @@ export function shouldReuseManagedArchiveTool(
   existingRecord: ToolRecord | undefined,
   source: ArchiveToolSource
 ): boolean {
-  if (!isPinnedToolVersion(source.requestedVersion)) {
-    return true;
-  }
-
   if (!existingRecord || (existingRecord.mode ?? "managed") !== "managed") {
     return false;
   }
