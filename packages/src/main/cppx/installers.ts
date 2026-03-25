@@ -1,11 +1,12 @@
 ﻿import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
+import { createReadStream } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { execFile as execFileCb } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import type {
   DependencyBackend,
@@ -43,6 +44,7 @@ import type {
 interface ArchiveToolSource {
   version: string;
   urls: string[];
+  sha256?: string;
   executable: string;
   sourceKind: ToolSourceKind;
   requestedVersion: string;
@@ -53,6 +55,7 @@ interface ArchiveToolSource {
 interface GitHubAsset {
   name: string;
   browser_download_url: string;
+  digest?: string | null;
 }
 
 interface GitHubRelease {
@@ -80,6 +83,7 @@ interface ResolvedToolInfo {
   resolvedVersion: string;
   compilerFamily?: CompilerFamily;
   catalogId?: string;
+  verifiedSha256?: string;
   baseEnv?: NodeJS.ProcessEnv;
 }
 
@@ -93,6 +97,26 @@ interface ResolvedToolExecutable {
   resolvedVersion?: string;
   compilerFamily?: CompilerFamily;
   catalogId?: string;
+  verifiedSha256?: string;
+}
+
+export interface ToolResolutionDetail {
+  ready: boolean;
+  mode?: "managed" | "system";
+  sourceKind?: ToolSourceKind;
+  requestedVersion?: string;
+  resolvedVersion?: string;
+  executable?: string;
+  compilerFamily?: CompilerFamily;
+  catalogId?: string;
+  verifiedSha256?: string;
+}
+
+export interface ToolResolutionSnapshot {
+  cmake: ToolResolutionDetail;
+  ninja: ToolResolutionDetail;
+  vcpkg: ToolResolutionDetail;
+  cxx: ToolResolutionDetail;
 }
 
 interface ResolvedToolPolicies {
@@ -120,6 +144,56 @@ const GITHUB_API_HEADERS = {
   Accept: "application/vnd.github+json",
   "User-Agent": "cppx"
 };
+
+function normalizeSha256Digest(digest?: string | null): string | null {
+  if (typeof digest !== "string") {
+    return null;
+  }
+
+  const trimmed = digest.trim().toLowerCase();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const withoutPrefix = trimmed.startsWith("sha256:") ? trimmed.slice("sha256:".length) : trimmed;
+  return /^[a-f0-9]{64}$/.test(withoutPrefix) ? withoutPrefix : null;
+}
+
+async function computeFileSha256(targetPath: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(targetPath);
+
+  return new Promise((resolve, reject) => {
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex").toLowerCase()));
+  });
+}
+
+export async function verifyFileChecksumOrThrow(
+  targetPath: string,
+  expectedDigest: string,
+  options: { removeOnMismatch?: boolean } = {}
+): Promise<string> {
+  const normalizedExpected = normalizeSha256Digest(expectedDigest);
+  if (!normalizedExpected) {
+    throw new CppxError("지원하지 않는 SHA-256 체크섬 형식입니다.", expectedDigest);
+  }
+
+  const actual = await computeFileSha256(targetPath);
+  if (actual === normalizedExpected) {
+    return actual;
+  }
+
+  if (options.removeOnMismatch !== false) {
+    await fs.rm(targetPath, { force: true });
+  }
+
+  throw new CppxError(
+    "다운로드 체크섬이 일치하지 않습니다.",
+    `expected=sha256:${normalizedExpected}, actual=sha256:${actual}`
+  );
+}
 
 function normalizeToolMode(value: unknown, fallback: "managed" | "system"): "managed" | "system" {
   return value === "system" || value === "managed" ? value : fallback;
@@ -178,10 +252,13 @@ export function shouldReuseManagedArchiveTool(
   }
 
   const recordedVersion = existingRecord.resolvedVersion ?? existingRecord.version;
+  const expectedSha256 = normalizeSha256Digest(source.sha256);
+  const recordedSha256 = normalizeSha256Digest(existingRecord.verifiedSha256);
   return (
     recordedVersion === source.version &&
     (existingRecord.sourceKind ?? source.sourceKind) === source.sourceKind &&
-    (existingRecord.catalogId ?? source.catalogId) === source.catalogId
+    (existingRecord.catalogId ?? source.catalogId) === source.catalogId &&
+    (!expectedSha256 || recordedSha256 === expectedSha256)
   );
 }
 
@@ -639,6 +716,14 @@ async function resolveLatestCxxSource(
       .find((asset) => asset !== undefined);
 
     if (selected) {
+      const sha256 = normalizeSha256Digest(selected.digest);
+      if (!sha256) {
+        throw new CppxError(
+          "llvm-mingw 릴리스 에셋에 검증 가능한 SHA-256 정보가 없습니다.",
+          selected.name
+        );
+      }
+
       logger.info(
         "install-tools",
         `llvm-mingw 릴리스 사용: ${release.tag_name} (${selected.name})`
@@ -646,6 +731,7 @@ async function resolveLatestCxxSource(
       return {
         version: sanitizeVersionToken(release.tag_name),
         urls: [selected.browser_download_url],
+        sha256,
         executable: entry.executable,
         sourceKind: entry.sourceKind,
         requestedVersion: policy.version,
@@ -691,7 +777,8 @@ async function registerTool(record: ResolvedToolInfo): Promise<void> {
     platform: hostAdapter.platform,
     arch: getHostArchLabel(),
     compilerFamily: record.compilerFamily,
-    catalogId: record.catalogId
+    catalogId: record.catalogId,
+    verifiedSha256: record.verifiedSha256
   });
 }
 
@@ -715,6 +802,10 @@ async function resolveExecutableFromPath(candidates: string[]): Promise<string |
   }
 
   return null;
+}
+
+export async function findExecutableOnPath(...candidates: string[]): Promise<string | null> {
+  return resolveExecutableFromPath(candidates);
 }
 
 async function resolveSystemTool(
@@ -783,6 +874,11 @@ async function installArchiveToolFromSource(
   source: ArchiveToolSource,
   logger: CppxLogger
 ): Promise<ResolvedToolInfo> {
+  const normalizedSha256 = normalizeSha256Digest(source.sha256);
+  if (!normalizedSha256) {
+    throw new CppxError(`${tool} 다운로드 검증 정보가 없습니다.`);
+  }
+
   const toolRoot = getToolRoot(tool);
   await ensureDir(toolRoot);
   const manifest = await readToolManifest();
@@ -802,7 +898,8 @@ async function installArchiveToolFromSource(
         requestedVersion: source.requestedVersion,
         resolvedVersion: existingRecord?.resolvedVersion ?? existingRecord?.version ?? source.version,
         compilerFamily: existingRecord?.compilerFamily ?? source.compilerFamily,
-        catalogId: existingRecord?.catalogId ?? source.catalogId
+        catalogId: existingRecord?.catalogId ?? source.catalogId,
+        verifiedSha256: existingRecord?.verifiedSha256 ?? normalizedSha256
       };
       await registerTool(record);
       return record;
@@ -818,6 +915,20 @@ async function installArchiveToolFromSource(
     `${tool}-${sanitizeVersionToken(source.version)}.zip`
   );
 
+  if (await pathExists(archivePath)) {
+    try {
+      await verifyFileChecksumOrThrow(archivePath, normalizedSha256, { removeOnMismatch: true });
+      logger.info("install-tools", `캐시된 아카이브 검증 완료: ${archivePath}`);
+    } catch (error) {
+      logger.warn(
+        "install-tools",
+        `캐시된 아카이브를 다시 받습니다: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
   if (!(await pathExists(archivePath))) {
     if (source.urls.length === 0) {
       throw new CppxError(`${tool} 다운로드 URL이 비어 있습니다.`);
@@ -830,6 +941,9 @@ async function installArchiveToolFromSource(
       const url = source.urls[index];
       try {
         await downloadFileWithRetry(url, archivePath, logger);
+        await verifyFileChecksumOrThrow(archivePath, normalizedSha256, {
+          removeOnMismatch: true
+        });
         downloaded = true;
         break;
       } catch (error) {
@@ -869,7 +983,8 @@ async function installArchiveToolFromSource(
     requestedVersion: source.requestedVersion,
     resolvedVersion: source.version,
     compilerFamily: source.compilerFamily,
-    catalogId: source.catalogId
+    catalogId: source.catalogId,
+    verifiedSha256: normalizedSha256
   };
   await registerTool(record);
   logger.success("install-tools", `${tool} 설치됨: ${executable}`);
@@ -887,6 +1002,7 @@ async function installStaticArchiveTool(
     {
       version: entry.version ?? policy.version,
       urls: entry.urls ?? [],
+      sha256: entry.sha256,
       executable: entry.executable,
       sourceKind: entry.sourceKind,
       requestedVersion: policy.version,
@@ -1262,6 +1378,7 @@ function buildResolvedExecutable(
     resolvedVersion?: string;
     compilerFamily?: CompilerFamily;
     catalogId?: string;
+    verifiedSha256?: string;
   }
 ): ResolvedToolExecutable {
   return {
@@ -1273,7 +1390,8 @@ function buildResolvedExecutable(
     requestedVersion: record?.requestedVersion ?? fallback.requestedVersion,
     resolvedVersion: record?.resolvedVersion ?? record?.version ?? fallback.resolvedVersion,
     compilerFamily: record?.compilerFamily ?? fallback.compilerFamily,
-    catalogId: record?.catalogId ?? fallback.catalogId
+    catalogId: record?.catalogId ?? fallback.catalogId,
+    verifiedSha256: record?.verifiedSha256 ?? fallback.verifiedSha256
   };
 }
 
@@ -1416,7 +1534,78 @@ function toStatusDetail(
     sourceKind: resolved.sourceKind,
     requestedVersion: resolved.requestedVersion,
     resolvedVersion: resolved.resolvedVersion,
-    executable: resolved.executable
+    executable: resolved.executable,
+    verifiedSha256: resolved.verifiedSha256
+  };
+}
+
+function toResolutionDetail(
+  resolved: ResolvedToolExecutable | null,
+  fallback?: {
+    mode?: "managed" | "system";
+    requestedVersion?: string;
+    compilerFamily?: CompilerFamily;
+    verifiedSha256?: string;
+  }
+): ToolResolutionDetail {
+  if (!resolved) {
+    return {
+      ready: false,
+      mode: fallback?.mode,
+      requestedVersion: fallback?.requestedVersion,
+      compilerFamily: fallback?.compilerFamily,
+      verifiedSha256: fallback?.verifiedSha256
+    };
+  }
+
+  return {
+    ready: true,
+    mode: resolved.mode,
+    sourceKind: resolved.sourceKind,
+    requestedVersion: resolved.requestedVersion,
+    resolvedVersion: resolved.resolvedVersion,
+    executable: resolved.executable,
+    compilerFamily: resolved.compilerFamily,
+    catalogId: resolved.catalogId,
+    verifiedSha256: resolved.verifiedSha256
+  };
+}
+
+export async function getResolvedToolSnapshot(
+  toolPolicies?: ProjectToolPoliciesPayload,
+  dependencyBackend: DependencyBackend = hostAdapter.getDefaultDependencyBackend()
+): Promise<ToolResolutionSnapshot> {
+  await ensureCppxLayout();
+  const manifest = await readToolManifest();
+  const policies = resolveRequestedPolicies(toolPolicies);
+
+  const [cmake, ninja, vcpkg, cxx] = await Promise.all([
+    resolveToolExecutable("cmake", manifest, policies.cmake),
+    resolveToolExecutable("ninja", manifest, policies.ninja),
+    dependencyBackend === "vcpkg"
+      ? resolveToolExecutable("vcpkg", manifest, policies.vcpkg)
+      : Promise.resolve(null),
+    resolveToolExecutable("cxx", manifest, policies.cxx)
+  ]);
+
+  return {
+    cmake: toResolutionDetail(cmake, {
+      mode: policies.cmake.mode,
+      requestedVersion: policies.cmake.version
+    }),
+    ninja: toResolutionDetail(ninja, {
+      mode: policies.ninja.mode,
+      requestedVersion: policies.ninja.version
+    }),
+    vcpkg: toResolutionDetail(vcpkg, {
+      mode: policies.vcpkg.mode,
+      requestedVersion: policies.vcpkg.version
+    }),
+    cxx: toResolutionDetail(cxx, {
+      mode: policies.cxx.mode,
+      requestedVersion: policies.cxx.version,
+      compilerFamily: policies.cxx.preferredFamily
+    })
   };
 }
 

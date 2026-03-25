@@ -38,6 +38,7 @@ npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Progr
 
 ```bash
 npm run cppx -- init ./myapp --name myapp
+npm run cppx -- init ./myapp --name myapp --backend conan
 ```
 
 옵션:
@@ -45,8 +46,9 @@ npm run cppx -- init ./myapp --name myapp
 | 옵션 | 설명 |
 |---|---|
 | `-n, --name <name>` | 프로젝트 이름 |
+| `--backend <vcpkg|conan|none>` | 초기 dependency backend 선택 |
 
-기본 backend와 기본 도구 정책은 호스트 운영체제에 따라 자동 선택됩니다.
+기본 backend와 기본 도구 정책은 호스트 운영체제에 따라 자동 선택되지만, `--backend`로 첫 초기화 시점에 명시적으로 바꿀 수 있습니다.
 
 ### `add <dependency> [workspace]`
 
@@ -58,8 +60,8 @@ npm run cppx -- add fmt ./myapp
 
 backend별 동작:
 
-- `vcpkg`: 패키지 목록에 추가하고 다음 sync 때 `.cppx/vcpkg.json`에 반영
-- `conan`: 패키지 목록에 추가하고 다음 sync 때 `.cppx/conanfile.txt`에 반영
+- `vcpkg`: 패키지 목록에 추가하고 다음 sync 때 `build/.cppx/vcpkg.json`에 반영
+- `conan`: 패키지 목록에 추가하고 다음 sync 때 `build/.cppx/conanfile.txt`에 반영
 - `none`: 명령이 실패하며, 의존성은 사용자가 직접 관리
 
 ### `build [workspace]`
@@ -108,12 +110,13 @@ npm run cppx -- pack ./myapp
 npm run cppx -- pack ./myapp --preset release-x64
 ```
 
-### `status`
+### `status [workspace]`
 
 도구 설치 상태를 확인합니다.
 
 ```bash
 npm run cppx -- status
+npm run cppx -- status ./myapp
 ```
 
 가능하면 다음 정보를 함께 보여 줍니다.
@@ -121,6 +124,7 @@ npm run cppx -- status
 - 설치 모드: `managed` 또는 `system`
 - 해석된 버전
 - 소스 종류: `catalog-archive`, `catalog-git`, `catalog-github-release`, `system-detected`, `msvc-detected`
+- 검증된 SHA-256 일부
 - 실행 파일 경로
 
 예시:
@@ -128,6 +132,28 @@ npm run cppx -- status
 ```text
 cmake: ready (system, 3.30.5, system-detected, /usr/bin/cmake)
 ```
+
+`status [workspace]`는 workspace에 `.cppx/config.toml`이 있으면 backend, schema, 다음 단계 힌트도 함께 보여 줍니다.
+
+### `doctor [workspace]`
+
+현재 호스트와 workspace를 기준으로 blocker, warning, 다음 단계 안내를 보여 줍니다.
+
+```bash
+npm run cppx -- doctor
+npm run cppx -- doctor ./myapp
+```
+
+`doctor`는 다음 항목을 점검합니다.
+
+- 호스트 플랫폼과 현재 compiler family
+- `cmake`, `ninja`, `ctest`, `cpack`, C++ 컴파일러 상태
+- 활성 dependency backend 준비 상태
+- `conan` backend일 때 Conan 실행 파일 존재 여부
+- `.cppx/config.toml`, schema 상태, `build/.cppx` 생성물 루트 상태
+- `dependency_backend = "none"`일 때 왜 `cppx add`가 비활성화되는지
+
+출력은 `BLOCKER`, `WARN`, `OK`로 구분됩니다. blocker가 하나라도 있으면 종료 코드는 `1`, blocker가 없으면 `0`입니다.
 
 ## 프리셋 동작
 
@@ -140,8 +166,9 @@ cmake: ready (system, 3.30.5, system-detected, /usr/bin/cmake)
 
 ## backend 동작
 
-- `vcpkg`: `.cppx/vcpkg.json` 생성, vcpkg toolchain 사용
-- `conan`: `.cppx/conanfile.txt` 생성, configure 전에 `conan install` 실행
+- `vcpkg`: `build/.cppx/vcpkg.json` 생성, vcpkg toolchain 사용
+- `conan`: `build/.cppx/conanfile.txt` 생성, configure 전에 `conan install` 실행
 - `none`: backend manifest 없음, `cppx add` 비활성화
 
 프로젝트를 `init`으로 만들 때 기본 backend는 Windows에서 `vcpkg`, macOS와 Linux에서 `none`입니다.
+`none` backend에서 의존성이 필요해지면 `dependency_backend`를 `conan` 또는 `vcpkg`로 바꾸고 `doctor`를 다시 실행하는 편이 안전합니다.

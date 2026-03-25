@@ -7,10 +7,10 @@ cppx는 C++ 프로젝트를 `init -> add -> build -> run -> test -> pack` 흐름
 ## 이 가이드에서 다루는 내용
 
 - [도구 설치](./install.md): 운영체제별 기본 도구 정책과 `install-tools` 사용법
-- [CLI 사용법](./cli.md): init, add, build, run, test, pack, status 명령
-- [설정 (config.toml)](./config.md): schema v2 설정 구조와 생성물 반영 방식
+- [CLI 사용법](./cli.md): init, add, build, run, test, pack, status, doctor 명령
+- [설정 (config.toml)](./config.md): schema v3 설정 구조와 생성물 반영 방식
 - [GUI 사용법](./gui.md): GUI에서 백엔드, 도구 정책, 프리셋, 빌드를 다루는 방법
-- [마이그레이션](./migration.md): 레거시 `.cppx/project.json`과 루트 생성물에서 v2로 옮기는 방법
+- [마이그레이션](./migration.md): 레거시 `.cppx/project.json`과 루트 생성물에서 현재 config 구조로 옮기는 방법
 
 ## CLI와 GUI의 관계
 
@@ -43,6 +43,7 @@ npm run cppx -- install-tools
 
 ```bash
 npm run cppx -- init ./myapp --name myapp
+npm run cppx -- doctor ./myapp
 ```
 
 초기화가 끝나면 다음 파일들이 생성됩니다.
@@ -50,10 +51,10 @@ npm run cppx -- init ./myapp --name myapp
 | 파일 | 역할 |
 |---|---|
 | `src/main.cpp` | 시작용 C++ 소스 |
-| `.cppx/config.toml` | schema v2 프로젝트 설정 |
-| `.cppx/CMakeLists.txt` | 생성된 CMake 스크립트 |
-| `.cppx/CMakePresets.json` | configure/build/test/pack 프리셋 |
-| `.cppx/vcpkg.json` 또는 `.cppx/conanfile.txt` | 선택한 backend용 manifest |
+| `.cppx/config.toml` | schema v3 프로젝트 설정 |
+| `build/.cppx/CMakeLists.txt` | 생성된 CMake 스크립트 |
+| `build/.cppx/CMakePresets.json` | configure/build/test/pack 프리셋 |
+| `build/.cppx/vcpkg.json` 또는 `build/.cppx/conanfile.txt` | 선택한 backend용 manifest |
 | `.vscode/tasks.json` | VSCode 작업 정의 |
 | `.vscode/launch.json` | 실행 가능한 프리셋용 디버그 설정 |
 
@@ -67,7 +68,7 @@ npm run cppx -- run ./myapp
 `run`은 `cargo run`처럼 build를 먼저 수행한 뒤 바이너리를 실행합니다.
 
 ::: tip 생성물은 직접 수정하지 않는 편이 맞습니다
-`.cppx/config.toml`을 기준으로 `CMakeLists.txt`, `CMakePresets.json`, backend manifest, VSCode 설정이 다시 생성됩니다. 생성물은 결과물로 보고, 설정 원본은 `config.toml`을 유지하는 편이 안전합니다.
+`.cppx/config.toml`을 기준으로 `build/.cppx` 아래의 CMake/backend 생성물과 `cppx:`가 붙은 VSCode 관리 항목이 다시 생성됩니다. 생성물은 결과물로 보고, 설정 원본은 `config.toml`을 유지하는 편이 안전합니다.
 :::
 
 ## GUI로 시작하기

@@ -29,11 +29,13 @@ export interface CompilerToolPolicy extends ToolPolicy {
 
 export interface NormalizedProjectConfig extends ProjectConfigPayload {
   schemaVersion: number;
+  targetName: string;
   dependencyBackend: DependencyBackend;
   compiler: {
     preferredFamily?: CompilerPreference;
     msvcInstallationPath?: string;
   };
+  package: NonNullable<ProjectConfigPayload["package"]>;
   tools: {
     cmake: ToolPolicy;
     ninja: ToolPolicy;
@@ -52,6 +54,7 @@ export interface ToolCatalogEntry {
   executable: string;
   version?: string;
   urls?: string[];
+  sha256?: string;
   repoUrl?: string;
   assetPatterns?: string[];
   compilerFamily?: CompilerFamily;
@@ -71,6 +74,7 @@ export interface ToolRecord {
   arch?: string;
   compilerFamily?: CompilerFamily;
   catalogId?: string;
+  verifiedSha256?: string;
 }
 
 export interface ToolManifest {

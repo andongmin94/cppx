@@ -16,6 +16,7 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     sourceKind: "catalog-archive",
     executable: hostAdapter.getExecutableName("cmake"),
     version: "3.30.5",
+    sha256: "5ab6e1faf20256ee4f04886597e8b6c3b1bd1297b58a68a58511af013710004b",
     urls: [
       "https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-windows-x86_64.zip",
       "https://cmake.org/files/v3.30/cmake-3.30.5-windows-x86_64.zip"
@@ -29,6 +30,7 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     sourceKind: "catalog-archive",
     executable: hostAdapter.getExecutableName("ninja"),
     version: "1.12.1",
+    sha256: "f550fec705b6d6ff58f2db3c374c2277a37691678d6aba463adcbb129108467a",
     urls: ["https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip"]
   },
   {

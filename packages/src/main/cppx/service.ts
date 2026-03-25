@@ -184,7 +184,8 @@ export class CppxService {
             workspace,
             payload.projectName,
             toolchain,
-            this.logger
+            this.logger,
+            { dependencyBackend }
           );
           resolvedWorkspace = initializedWorkspace;
           await cleanupLegacyWorkspaceFiles(initializedWorkspace, this.logger);

@@ -3,6 +3,7 @@ import { runSpawn } from "./command-runner";
 import { CppxError } from "./errors";
 import type { CppxLogger } from "./logger";
 import type { NormalizedProjectConfig, Toolchain } from "./types";
+import { createGeneratedTextBanner, VSCODE_GENERATED_ROOT } from "./workspace-layout";
 
 type GeneratedFile =
   | { relativePath: string; kind: "json"; content: Record<string, unknown> }
@@ -55,8 +56,8 @@ export interface DependencyBackendAdapter {
 
 function createVcpkgManifest(config: NormalizedProjectConfig): Record<string, unknown> {
   return {
-    name: config.name.toLowerCase().replace(/\s+/g, "-"),
-    version: "0.1.0",
+    name: config.targetName.toLowerCase(),
+    version: config.package.version,
     dependencies: config.dependencies
   };
 }
@@ -64,7 +65,7 @@ function createVcpkgManifest(config: NormalizedProjectConfig): Record<string, un
 function createConanFile(config: NormalizedProjectConfig): string {
   const requires = config.dependencies.length > 0 ? `${config.dependencies.join("\n")}\n` : "";
 
-  return `[requires]
+  return `${createGeneratedTextBanner()}[requires]
 ${requires}[generators]
 CMakeToolchain
 CMakeDeps
@@ -169,7 +170,7 @@ const conanBackend: DependencyBackendAdapter = {
           label: "cppx: deps conan",
           type: "shell",
           command: "conan install . --output-folder . --build missing",
-          options: { cwd: "${workspaceFolder}/.cppx" },
+          options: { cwd: VSCODE_GENERATED_ROOT },
           group: "build"
         }
       ]

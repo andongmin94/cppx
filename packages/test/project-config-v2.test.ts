@@ -80,6 +80,7 @@ test("loadProjectConfig reads schema v2 fields and normalizes them", async () =>
     const config = await loadProjectConfig(workspace);
 
     assert.equal(config.name, "v2-app");
+    assert.equal(config.targetName, "v2-app");
     assert.equal(config.schemaVersion, 2);
     assert.equal(config.defaultPreset, "release-x64");
     assert.equal(config.sourceFile, "src/app/main.cpp");
@@ -93,6 +94,10 @@ test("loadProjectConfig reads schema v2 fields and normalizes them", async () =>
     assert.deepEqual(config.cmake.linkLibraries, ["bcrypt", "ws2_32"]);
     assert.equal(config.compiler?.preferredFamily, "msvc");
     assert.equal(config.compiler?.msvcInstallationPath, "C:\\VS\\BuildTools");
+    assert.equal(config.package?.version, "0.1.0");
+    assert.equal(config.package?.vendor, "v2-app");
+    assert.deepEqual(config.package?.generators, ["ZIP"]);
+    assert.equal(config.package?.outputDir, "dist");
     assert.equal(config.tools?.cmake?.mode, "managed");
     assert.equal(config.tools?.cmake?.version, "3.30.5");
     assert.equal(config.tools?.ninja?.mode, "system");
@@ -118,7 +123,7 @@ test("loadProjectConfig reads schema v2 fields and normalizes them", async () =>
   }
 });
 
-test("saveProjectConfig round-trips schema v2 fields", async () => {
+test("saveProjectConfig upgrades writable configs to schema v3 while keeping v2 fields readable", async () => {
   const localAppData = await createTempDir("config-v2-save-root");
   const workspace = await createTempDir("config-v2-save");
   const { logger } = createLogger();
@@ -173,7 +178,7 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
         }
       });
 
-      assert.equal(saved.schemaVersion, 2);
+      assert.equal(saved.schemaVersion, 3);
       assert.equal(saved.dependencyBackend, "conan");
       assert.equal(saved.compiler?.preferredFamily, "msvc");
       assert.equal(saved.compiler?.msvcInstallationPath, "C:\\VS\\BuildTools");
@@ -187,6 +192,11 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
       assert.equal(saved.tools?.cxx?.version, "17.9.0");
       assert.equal(saved.tools?.cxx?.preferredFamily, "msvc");
       assert.equal(saved.tools?.cxx?.msvcInstallationPath, "C:\\VS\\BuildTools");
+      assert.equal(saved.targetName, "v2-save-app");
+      assert.equal(saved.package?.version, "0.1.0");
+      assert.equal(saved.package?.vendor, "v2-save-app");
+      assert.deepEqual(saved.package?.generators, ["ZIP"]);
+      assert.equal(saved.package?.outputDir, "dist");
       assert.deepEqual(saved.dependencies, ["fmt", "spdlog"]);
       assert.deepEqual(saved.cmake.compileDefinitions, ["USE_SSL", "APP_VERSION=1"]);
       assert.deepEqual(saved.cmake.compileOptions, ["-Wall", "-Wextra"]);
@@ -198,7 +208,7 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
       ]);
 
       const reloaded = await loadProjectConfig(workspace);
-      assert.equal(reloaded.schemaVersion, 2);
+      assert.equal(reloaded.schemaVersion, 3);
       assert.equal(reloaded.dependencyBackend, "conan");
       assert.equal(reloaded.compiler?.preferredFamily, "msvc");
       assert.equal(reloaded.compiler?.msvcInstallationPath, "C:\\VS\\BuildTools");
@@ -212,6 +222,11 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
       assert.equal(reloaded.tools?.cxx?.version, "17.9.0");
       assert.equal(reloaded.tools?.cxx?.preferredFamily, "msvc");
       assert.equal(reloaded.tools?.cxx?.msvcInstallationPath, "C:\\VS\\BuildTools");
+      assert.equal(reloaded.targetName, "v2-save-app");
+      assert.equal(reloaded.package?.version, "0.1.0");
+      assert.equal(reloaded.package?.vendor, "v2-save-app");
+      assert.deepEqual(reloaded.package?.generators, ["ZIP"]);
+      assert.equal(reloaded.package?.outputDir, "dist");
       assert.deepEqual(reloaded.dependencies, ["fmt", "spdlog"]);
       assert.deepEqual(reloaded.cmake.compileDefinitions, ["USE_SSL", "APP_VERSION=1"]);
       assert.deepEqual(reloaded.cmake.compileOptions, ["-Wall", "-Wextra"]);
@@ -221,6 +236,58 @@ test("saveProjectConfig round-trips schema v2 fields", async () => {
         "debug-x64",
         "release-x64"
       ]);
+    });
+  } finally {
+    await removeDir(localAppData);
+    await removeDir(workspace);
+  }
+});
+
+test("saveProjectConfig persists schema v3 target_name and package metadata", async () => {
+  const localAppData = await createTempDir("config-v3-root");
+  const workspace = await createTempDir("config-v3");
+  const { logger } = createLogger();
+
+  try {
+    await withHostDataRoot(localAppData, async () => {
+      await initProject(workspace, "Fancy App", createToolchain(), logger);
+
+      const current = await loadProjectConfig(workspace);
+      const saved = await saveProjectConfig(workspace, {
+        ...current,
+        name: "Fancy App",
+        targetName: "fancy_app",
+        package: {
+          version: "1.2.3-beta.1",
+          vendor: "Acme Tools",
+          generators: ["ZIP", "TGZ"],
+          outputDir: "artifacts",
+          licenseFile: "LICENSE.txt",
+          readmeFile: "README.md",
+          icon: "assets/icon.png"
+        }
+      });
+
+      assert.equal(saved.schemaVersion, 3);
+      assert.equal(saved.targetName, "fancy_app");
+      assert.equal(saved.package?.version, "1.2.3-beta.1");
+      assert.equal(saved.package?.vendor, "Acme Tools");
+      assert.deepEqual(saved.package?.generators, ["ZIP", "TGZ"]);
+      assert.equal(saved.package?.outputDir, "artifacts");
+      assert.equal(saved.package?.licenseFile, "LICENSE.txt");
+      assert.equal(saved.package?.readmeFile, "README.md");
+      assert.equal(saved.package?.icon, "assets/icon.png");
+
+      const reloaded = await loadProjectConfig(workspace);
+      assert.equal(reloaded.schemaVersion, 3);
+      assert.equal(reloaded.targetName, "fancy_app");
+      assert.equal(reloaded.package?.version, "1.2.3-beta.1");
+      assert.equal(reloaded.package?.vendor, "Acme Tools");
+      assert.deepEqual(reloaded.package?.generators, ["ZIP", "TGZ"]);
+      assert.equal(reloaded.package?.outputDir, "artifacts");
+      assert.equal(reloaded.package?.licenseFile, "LICENSE.txt");
+      assert.equal(reloaded.package?.readmeFile, "README.md");
+      assert.equal(reloaded.package?.icon, "assets/icon.png");
     });
   } finally {
     await removeDir(localAppData);

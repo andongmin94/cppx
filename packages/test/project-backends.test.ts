@@ -13,6 +13,7 @@ import {
   createLogger,
   createTempDir,
   createToolchain,
+  generatedRoot,
   readJson,
   readText,
   removeDir,
@@ -54,12 +55,12 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
       await syncGeneratedFiles(workspace, updated as any, createToolchain());
 
       assert.match(
-        await readText(path.join(workspace, ".cppx", "conanfile.txt")),
+        await readText(path.join(generatedRoot(workspace), "conanfile.txt")),
         /\[requires\][\s\S]*fmt\/11\.0\.2[\s\S]*spdlog\/1\.14\.1/
       );
-      await assert.rejects(() => readText(path.join(workspace, ".cppx", "vcpkg.json")));
+      await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
 
-      const presets = await readJson<any>(path.join(workspace, ".cppx", "CMakePresets.json"));
+      const presets = await readJson<any>(path.join(generatedRoot(workspace), "CMakePresets.json"));
       assert.deepEqual(
         presets.configurePresets.map((preset: any) => preset.name),
         ["asan-x64", "release-lto"]
@@ -119,10 +120,10 @@ test("syncGeneratedFiles supports none backend without dependency manifests", as
 
       await syncGeneratedFiles(workspace, updated as any, createToolchain());
 
-      await assert.rejects(() => readText(path.join(workspace, ".cppx", "vcpkg.json")));
-      await assert.rejects(() => readText(path.join(workspace, ".cppx", "conanfile.txt")));
+      await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
+      await assert.rejects(() => readText(path.join(generatedRoot(workspace), "conanfile.txt")));
 
-      const presets = await readJson<any>(path.join(workspace, ".cppx", "CMakePresets.json"));
+      const presets = await readJson<any>(path.join(generatedRoot(workspace), "CMakePresets.json"));
       assert.equal(presets.configurePresets[0].toolchainFile, undefined);
       assert.equal(
         presets.configurePresets[0].cacheVariables.VCPKG_TARGET_TRIPLET,

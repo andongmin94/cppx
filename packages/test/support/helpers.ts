@@ -37,6 +37,10 @@ export async function readJson<T>(targetPath: string): Promise<T> {
   return JSON.parse(await readText(targetPath)) as T;
 }
 
+export function generatedRoot(workspace: string): string {
+  return path.join(workspace, "build", ".cppx");
+}
+
 export async function readFixtureText(...segments: string[]): Promise<string> {
   return readText(path.join(fixtureRoot(), ...segments));
 }

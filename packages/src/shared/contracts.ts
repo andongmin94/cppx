@@ -65,8 +65,19 @@ export interface CompilerConfigPayload {
   msvcInstallationPath?: string;
 }
 
+export interface PackageConfigPayload {
+  version: string;
+  vendor: string;
+  generators: string[];
+  outputDir: string;
+  licenseFile?: string;
+  readmeFile?: string;
+  icon?: string;
+}
+
 export interface ProjectConfigPayload {
   name: string;
+  targetName?: string;
   defaultPreset: string;
   sourceFile: string;
   cxxStandard: number;
@@ -76,6 +87,7 @@ export interface ProjectConfigPayload {
   schemaVersion?: number;
   dependencyBackend?: DependencyBackend;
   compiler?: CompilerConfigPayload;
+  package?: PackageConfigPayload;
   tools?: ProjectToolPoliciesPayload;
   presets?: PresetConfigPayload[];
 }
@@ -115,6 +127,7 @@ export interface ToolStatusDetail {
   requestedVersion?: string;
   resolvedVersion?: string;
   executable?: string;
+  verifiedSha256?: string;
 }
 
 export interface CompilerScanResult {

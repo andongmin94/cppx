@@ -33,10 +33,16 @@ test("loadProjectConfig migrates the legacy project.json and vcpkg.json files", 
       const config = await loadProjectConfig(workspace);
 
       assert.equal(config.name, "legacy-app");
+      assert.equal(config.targetName, "legacy-app");
+      assert.equal(config.schemaVersion, 3);
       assert.equal(config.defaultPreset, getDefaultPresetName());
       assert.equal(config.sourceFile, "src/main.cpp");
       assert.equal(config.targetTriplet, hostAdapter.getDefaultTargetTriplet("mingw"));
       assert.deepEqual(config.dependencies, ["fmt", "boost-asio"]);
+      assert.equal(config.package?.version, "0.1.0");
+      assert.equal(config.package?.vendor, "legacy-app");
+      assert.deepEqual(config.package?.generators, ["ZIP"]);
+      assert.equal(config.package?.outputDir, "dist");
       assert.match(
         await readText(path.join(workspace, ".cppx", "config.toml")),
         /name = "legacy-app"/

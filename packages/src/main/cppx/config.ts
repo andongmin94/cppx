@@ -5,6 +5,7 @@ import type {
   CompilerConfigPayload,
   CompilerPreference,
   DependencyBackend,
+  PackageConfigPayload,
   PresetConfigPayload,
   ProjectConfigPayload,
   ProjectToolPoliciesPayload,
@@ -23,7 +24,7 @@ import type {
 
 export const CPPX_CONFIG_PATH = path.join(".cppx", "config.toml");
 const LEGACY_PROJECT_CONFIG_PATH = path.join(".cppx", "project.json");
-const CONFIG_SCHEMA_VERSION = 2;
+const CONFIG_SCHEMA_VERSION = 3;
 const DEFAULT_MANAGED_VERSION = "default";
 const DEFAULT_COMPILER_VERSION = "latest";
 const hostAdapter = getHostAdapter();
@@ -114,6 +115,11 @@ function normalizeStringArray(values: unknown): string[] {
     .filter((value) => value.length > 0);
 }
 
+function normalizeNonEmptyStringArray(values: unknown, fallback: string[]): string[] {
+  const normalized = normalizeStringArray(values);
+  return normalized.length > 0 ? normalized : [...fallback];
+}
+
 function normalizePositiveInteger(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return Math.trunc(value);
@@ -139,6 +145,30 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   }
 
   return fallback;
+}
+
+export function createSafeTargetName(projectName: string): string {
+  const base = projectName.trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/-+/g, "-");
+  const trimmed = base.replace(/^-+|-+$/g, "");
+
+  if (trimmed.length === 0) {
+    return "app";
+  }
+
+  if (/^[A-Za-z_]/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `app-${trimmed}`;
+}
+
+export function defaultPackageConfig(projectName: string): PackageConfigPayload {
+  return {
+    version: "0.1.0",
+    vendor: projectName,
+    generators: ["ZIP"],
+    outputDir: "dist"
+  };
 }
 
 function createDefaultPresets(targetTriplet: string): PresetConfigPayload[] {
@@ -233,6 +263,23 @@ function normalizeCompilerConfig(
   };
 }
 
+function normalizePackageConfig(
+  raw: unknown,
+  fallback: PackageConfigPayload
+): PackageConfigPayload {
+  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+
+  return {
+    version: normalizeString(record.version, fallback.version),
+    vendor: normalizeString(record.vendor, fallback.vendor),
+    generators: normalizeNonEmptyStringArray(record.generators, fallback.generators),
+    outputDir: normalizeString(record.outputDir, fallback.outputDir),
+    licenseFile: normalizeOptionalString(record.licenseFile),
+    readmeFile: normalizeOptionalString(record.readmeFile),
+    icon: normalizeOptionalString(record.icon)
+  };
+}
+
 function normalizePresetConfig(
   raw: unknown,
   index: number,
@@ -290,11 +337,36 @@ function mergeCompilerConfig(
   };
 }
 
+function mergePackageConfig(
+  current: PackageConfigPayload | undefined,
+  next: PackageConfigPayload | undefined
+): PackageConfigPayload | undefined {
+  if (!current && !next) {
+    return undefined;
+  }
+
+  const seed = next ?? current;
+  if (!seed) {
+    return undefined;
+  }
+
+  return {
+    version: next?.version ?? current?.version ?? seed.version,
+    vendor: next?.vendor ?? current?.vendor ?? seed.vendor,
+    generators: next?.generators ?? current?.generators ?? ["ZIP"],
+    outputDir: next?.outputDir ?? current?.outputDir ?? seed.outputDir,
+    licenseFile: next?.licenseFile ?? current?.licenseFile,
+    readmeFile: next?.readmeFile ?? current?.readmeFile,
+    icon: next?.icon ?? current?.icon
+  };
+}
+
 export function defaultProjectConfig(
   projectName: string,
   compilerFamily: CompilerFamily = "mingw"
 ): NormalizedProjectConfig {
   const targetTriplet = defaultTargetTripletForCompiler(compilerFamily);
+  const targetName = createSafeTargetName(projectName);
   const compiler =
     compilerFamily === "msvc"
       ? { preferredFamily: "msvc" as const }
@@ -303,6 +375,7 @@ export function defaultProjectConfig(
   return {
     schemaVersion: CONFIG_SCHEMA_VERSION,
     name: projectName,
+    targetName,
     defaultPreset: getDefaultPresetName(),
     sourceFile: "src/main.cpp",
     cxxStandard: 20,
@@ -311,6 +384,7 @@ export function defaultProjectConfig(
     dependencies: [],
     cmake: defaultCmakeConfig(),
     compiler,
+    package: defaultPackageConfig(projectName),
     tools: {
       cmake: defaultToolPolicy("cmake"),
       ninja: defaultToolPolicy("ninja"),
@@ -337,10 +411,22 @@ export function normalizeProjectConfig(
         ? raw.tools.cxx.preferredFamily
         : options.base?.compiler.preferredFamily ?? "mingw");
   const seed = options.base ?? defaultProjectConfig(fallbackName, inferredCompilerFamily);
+  const name = normalizeString(raw.name, seed.name) || fallbackName;
+  const packageSeed =
+    options.base && options.base.name === name
+      ? options.base.package
+      : defaultPackageConfig(name);
 
   const compiler = normalizeCompilerConfig(
     mergeCompilerConfig(raw.compiler, raw.tools?.cxx),
     seed.compiler
+  );
+  const derivedTargetName = createSafeTargetName(name);
+  const targetName = normalizeString(
+    raw.targetName,
+    options.base && options.base.name === name
+      ? options.base.targetName
+      : derivedTargetName
   );
   const targetTriplet = normalizeString(raw.targetTriplet, seed.targetTriplet);
   const dependencyBackend = isDependencyBackend(raw.dependencyBackend)
@@ -359,7 +445,8 @@ export function normalizeProjectConfig(
 
   return {
     schemaVersion: normalizePositiveInteger(raw.schemaVersion, seed.schemaVersion),
-    name: normalizeString(raw.name, seed.name) || fallbackName,
+    name,
+    targetName,
     defaultPreset,
     sourceFile: normalizeString(raw.sourceFile, seed.sourceFile),
     cxxStandard: normalizePositiveInteger(raw.cxxStandard, seed.cxxStandard),
@@ -388,6 +475,7 @@ export function normalizeProjectConfig(
           : [...seed.cmake.linkLibraries]
     },
     compiler,
+    package: normalizePackageConfig(raw.package, packageSeed),
     tools: {
       cmake: normalizeToolPolicy(raw.tools?.cmake, seed.tools.cmake),
       ninja: normalizeToolPolicy(raw.tools?.ninja, seed.tools.ninja),
@@ -408,6 +496,7 @@ export function mergeProjectConfigPayload(
       ...current,
       ...payload,
       compiler: mergeCompilerConfig(current.compiler, payload.compiler),
+      package: mergePackageConfig(current.package, payload.package),
       tools: mergeToolPolicies(current.tools, payload.tools),
       cmake: {
         ...current.cmake,
@@ -531,6 +620,7 @@ export function parseConfigToml(
     cmake: defaultCmakeConfig(),
     dependencies: [],
     compiler: {},
+    package: undefined,
     tools: {},
     presets: []
   };
@@ -595,6 +685,8 @@ export function parseConfigToml(
         raw.name = parseTomlString(value);
       } else if (key === "default_preset") {
         raw.defaultPreset = parseTomlString(value);
+      } else if (key === "target_name") {
+        raw.targetName = parseTomlString(value);
       } else if (key === "source_file") {
         raw.sourceFile = parseTomlString(value);
       } else if (key === "cxx_standard") {
@@ -604,6 +696,20 @@ export function parseConfigToml(
       } else if (key === "dependency_backend") {
         raw.dependencyBackend = parseTomlString(value) as DependencyBackend;
       }
+      continue;
+    }
+
+    if (section === "package") {
+      raw.package = {
+        ...(raw.package ?? defaultPackageConfig(seed.name)),
+        ...(key === "version" ? { version: parseTomlString(value) } : {}),
+        ...(key === "vendor" ? { vendor: parseTomlString(value) } : {}),
+        ...(key === "generators" ? { generators: parseTomlStringArray(value) } : {}),
+        ...(key === "output_dir" ? { outputDir: parseTomlString(value) } : {}),
+        ...(key === "license_file" ? { licenseFile: parseTomlString(value) } : {}),
+        ...(key === "readme_file" ? { readmeFile: parseTomlString(value) } : {}),
+        ...(key === "icon" ? { icon: parseTomlString(value) } : {})
+      };
       continue;
     }
 
@@ -724,13 +830,27 @@ export function configToToml(config: NormalizedProjectConfig): string {
   const sections: string[] = [
     "# cppx configuration",
     "[project]",
-    `schema_version = ${config.schemaVersion}`,
+    `schema_version = ${Math.max(config.schemaVersion, CONFIG_SCHEMA_VERSION)}`,
     `name = "${escapeTomlString(config.name)}"`,
+    `target_name = "${escapeTomlString(config.targetName)}"`,
     `default_preset = "${escapeTomlString(config.defaultPreset)}"`,
     `source_file = "${escapeTomlString(config.sourceFile)}"`,
     `cxx_standard = ${config.cxxStandard}`,
     `target_triplet = "${escapeTomlString(config.targetTriplet)}"`,
     `dependency_backend = "${escapeTomlString(config.dependencyBackend)}"`,
+    "",
+    "[package]",
+    `version = "${escapeTomlString(config.package.version)}"`,
+    `vendor = "${escapeTomlString(config.package.vendor)}"`,
+    `generators = ${tomlArray(config.package.generators)}`,
+    `output_dir = "${escapeTomlString(config.package.outputDir)}"`,
+    ...(config.package.licenseFile
+      ? [`license_file = "${escapeTomlString(config.package.licenseFile)}"`]
+      : []),
+    ...(config.package.readmeFile
+      ? [`readme_file = "${escapeTomlString(config.package.readmeFile)}"`]
+      : []),
+    ...(config.package.icon ? [`icon = "${escapeTomlString(config.package.icon)}"`] : []),
     "",
     "[compiler]"
   ];
@@ -795,7 +915,7 @@ export async function writeProjectConfigToml(
   config: NormalizedProjectConfig
 ): Promise<void> {
   const targetPath = path.join(workspace, CPPX_CONFIG_PATH);
-  await writeTextFile(targetPath, configToToml(config));
+  await writeTextFile(targetPath, configToToml({ ...config, schemaVersion: CONFIG_SCHEMA_VERSION }));
 }
 
 async function migrateLegacyConfig(

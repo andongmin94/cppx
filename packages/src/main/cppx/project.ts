@@ -15,20 +15,27 @@ import {
   type BackendPresetIntegration
 } from "./dependency-backends";
 import { CppxError } from "./errors";
-import { ensureDir, pathExists, writeJsonFile, writeTextFile } from "./fs-utils";
+import { ensureDir, pathExists, readJsonFile, writeJsonFile, writeTextFile } from "./fs-utils";
 import type { CppxLogger } from "./logger";
 import { getHostAdapter } from "./platform";
 import type { NormalizedProjectConfig, Toolchain } from "./types";
+import {
+  createGeneratedPresetsVendorMeta,
+  createGeneratedRootNotice,
+  createGeneratedTextBanner,
+  GENERATED_NOTICE_FILENAME,
+  GENERATED_ROOT,
+  getGeneratedSourceRelativePath,
+  getWorkspaceGeneratedRoot,
+  LEGACY_GENERATED_ROOT,
+  LEGACY_ROOT_GENERATED_FILES,
+  LEGACY_USER_ROOT_GENERATED_FILES,
+  toPosixPath,
+  VSCODE_GENERATED_ROOT
+} from "./workspace-layout";
 
 type ProjectConfig = NormalizedProjectConfig;
-
-const GENERATED_ROOT = ".cppx";
-const LEGACY_GENERATED_ROOT = path.join(".cppx", "generated");
 const hostAdapter = getHostAdapter();
-
-function toPosixPath(value: string): string {
-  return value.replace(/\\/g, "/");
-}
 
 function escapeCmakeString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -40,28 +47,29 @@ function renderCmakeArgs(values: string[]): string {
 
 function createCmakeCustomizationBlock(config: ProjectConfig): string {
   const lines: string[] = [];
+  const targetName = config.targetName;
 
   if (config.cmake.compileDefinitions.length > 0) {
     lines.push(
-      `target_compile_definitions(${config.name} PRIVATE ${renderCmakeArgs(config.cmake.compileDefinitions)})`
+      `target_compile_definitions(${targetName} PRIVATE ${renderCmakeArgs(config.cmake.compileDefinitions)})`
     );
   }
 
   if (config.cmake.compileOptions.length > 0) {
     lines.push(
-      `target_compile_options(${config.name} PRIVATE ${renderCmakeArgs(config.cmake.compileOptions)})`
+      `target_compile_options(${targetName} PRIVATE ${renderCmakeArgs(config.cmake.compileOptions)})`
     );
   }
 
   if (config.cmake.includeDirectories.length > 0) {
     lines.push(
-      `target_include_directories(${config.name} PRIVATE ${renderCmakeArgs(config.cmake.includeDirectories)})`
+      `target_include_directories(${targetName} PRIVATE ${renderCmakeArgs(config.cmake.includeDirectories)})`
     );
   }
 
   if (config.cmake.linkLibraries.length > 0) {
     lines.push(
-      `target_link_libraries(${config.name} PRIVATE ${renderCmakeArgs(config.cmake.linkLibraries)})`
+      `target_link_libraries(${targetName} PRIVATE ${renderCmakeArgs(config.cmake.linkLibraries)})`
     );
   }
 
@@ -79,29 +87,49 @@ int main() {
 }
 
 function createGeneratedCMakeLists(config: ProjectConfig): string {
-  const sourceExpr = `\${CMAKE_CURRENT_LIST_DIR}/../${toPosixPath(config.sourceFile)}`;
+  const sourceExpr = `\${CMAKE_CURRENT_LIST_DIR}/${getGeneratedSourceRelativePath(config.sourceFile)}`;
   const customization = createCmakeCustomizationBlock(config);
+  const targetOutputName = escapeCmakeString(config.name);
+  const packageVersion = escapeCmakeString(config.package.version);
+  const packageVendor = escapeCmakeString(config.package.vendor);
+  const packageGenerators = config.package.generators.map((value) => escapeCmakeString(value)).join(";");
+  const packageDirectory = `\${CMAKE_CURRENT_LIST_DIR}/${getGeneratedSourceRelativePath(config.package.outputDir)}`;
+  const optionalPackageLines = [
+    config.package.licenseFile
+      ? `set(CPACK_RESOURCE_FILE_LICENSE "${escapeCmakeString(`\${CMAKE_CURRENT_LIST_DIR}/${getGeneratedSourceRelativePath(config.package.licenseFile)}`)}")`
+      : undefined,
+    config.package.readmeFile
+      ? `set(CPACK_RESOURCE_FILE_README "${escapeCmakeString(`\${CMAKE_CURRENT_LIST_DIR}/${getGeneratedSourceRelativePath(config.package.readmeFile)}`)}")`
+      : undefined,
+    config.package.icon
+      ? `set(CPACK_PACKAGE_ICON "${escapeCmakeString(`\${CMAKE_CURRENT_LIST_DIR}/${getGeneratedSourceRelativePath(config.package.icon)}`)}")`
+      : undefined
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 
-  return `cmake_minimum_required(VERSION 3.28)
-project(${config.name} VERSION 0.1.0 LANGUAGES CXX)
+  return `${createGeneratedTextBanner()}cmake_minimum_required(VERSION 3.28)
+project(${config.targetName} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD ${config.cxxStandard})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(${config.name} "${sourceExpr}")
+add_executable(${config.targetName} "${sourceExpr}")
+set_target_properties(${config.targetName} PROPERTIES OUTPUT_NAME "${targetOutputName}")
 ${customization}include(CTest)
 if(BUILD_TESTING)
-  add_test(NAME ${config.name}_runs COMMAND ${config.name})
+  add_test(NAME ${config.targetName}_runs COMMAND ${config.targetName})
 endif()
 
-install(TARGETS ${config.name} RUNTIME DESTINATION bin)
+install(TARGETS ${config.targetName} RUNTIME DESTINATION bin)
 
 set(CPACK_PACKAGE_NAME "${config.name}")
-set(CPACK_PACKAGE_VENDOR "cppx")
-set(CPACK_PACKAGE_VERSION "\${PROJECT_VERSION}")
-set(CPACK_GENERATOR "ZIP")
-include(CPack)
+set(CPACK_PACKAGE_VENDOR "${packageVendor}")
+set(CPACK_PACKAGE_VERSION "${packageVersion}")
+set(CPACK_GENERATOR "${packageGenerators}")
+set(CPACK_PACKAGE_DIRECTORY "${escapeCmakeString(packageDirectory)}")
+${optionalPackageLines}${optionalPackageLines.length > 0 ? "\n" : ""}include(CPack)
 `;
 }
 
@@ -124,7 +152,7 @@ function createGeneratedPresets(
     const configurePreset: Record<string, unknown> = {
       name: preset.name,
       displayName: preset.displayName ?? preset.name,
-      binaryDir: `\${sourceDir}/../build/${preset.name}`,
+      binaryDir: `\${sourceDir}/../${preset.name}`,
       generator: common.generator,
       cacheVariables: {
         ...common.cacheVariables,
@@ -147,6 +175,7 @@ function createGeneratedPresets(
   return {
     version: 6,
     cmakeMinimumRequired: { major: 3, minor: 28, patch: 0 },
+    vendor: createGeneratedPresetsVendorMeta(),
     configurePresets,
     buildPresets: presets.map((preset) => ({
       name: preset.name,
@@ -160,7 +189,13 @@ function createGeneratedPresets(
     packagePresets: presets.map((preset) => ({
       name: preset.name,
       configurePreset: preset.name,
-      generators: ["ZIP"]
+      generators: config.package.generators,
+      output: {
+        packageName: config.name,
+        packageVersion: config.package.version,
+        vendorName: config.package.vendor,
+        packageDirectory: `\${sourceDir}/${getGeneratedSourceRelativePath(config.package.outputDir)}`
+      }
     }))
   };
 }
@@ -174,17 +209,130 @@ async function removeStaleGeneratedFiles(
   }
 }
 
+async function removeLegacyGeneratedFiles(workspace: string): Promise<void> {
+  for (const relativePath of LEGACY_ROOT_GENERATED_FILES) {
+    await fs.rm(path.join(workspace, relativePath), { force: true });
+  }
+
+  for (const relativePath of LEGACY_USER_ROOT_GENERATED_FILES) {
+    await fs.rm(path.join(workspace, ".cppx", relativePath), { force: true });
+  }
+
+  const legacyGeneratedPath = path.join(workspace, LEGACY_GENERATED_ROOT);
+  if (await pathExists(legacyGeneratedPath)) {
+    await fs.rm(legacyGeneratedPath, { recursive: true, force: true });
+  }
+}
+
+type VSCodeTaskFile = {
+  version?: string;
+  tasks?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+type VSCodeLaunchFile = {
+  version?: string;
+  configurations?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+function isManagedTask(task: Record<string, unknown>): boolean {
+  return typeof task.label === "string" && task.label.startsWith("cppx:");
+}
+
+function isManagedLaunch(configuration: Record<string, unknown>): boolean {
+  return typeof configuration.name === "string" && configuration.name.startsWith("cppx:");
+}
+
+async function writeManagedVSCodeTasks(
+  workspace: string,
+  nextValue: Record<string, unknown>
+): Promise<void> {
+  const targetPath = path.join(workspace, ".vscode", "tasks.json");
+  const current = await readJsonFile<VSCodeTaskFile>(targetPath, {
+    version: "2.0.0",
+    tasks: []
+  });
+  const currentTasks = Array.isArray(current.tasks) ? current.tasks : [];
+  const nextTasks = Array.isArray(nextValue.tasks)
+    ? (nextValue.tasks as Array<Record<string, unknown>>)
+    : [];
+
+  await writeJsonFile(targetPath, {
+    ...current,
+    ...nextValue,
+    tasks: [...currentTasks.filter((task) => !isManagedTask(task)), ...nextTasks]
+  });
+}
+
+async function writeManagedVSCodeLaunch(
+  workspace: string,
+  nextValue: Record<string, unknown>
+): Promise<void> {
+  const targetPath = path.join(workspace, ".vscode", "launch.json");
+  const current = await readJsonFile<VSCodeLaunchFile>(targetPath, {
+    version: "0.2.0",
+    configurations: []
+  });
+  const currentConfigurations = Array.isArray(current.configurations)
+    ? current.configurations
+    : [];
+  const nextConfigurations = Array.isArray(nextValue.configurations)
+    ? (nextValue.configurations as Array<Record<string, unknown>>)
+    : [];
+
+  await writeJsonFile(targetPath, {
+    ...current,
+    ...nextValue,
+    configurations: [
+      ...currentConfigurations.filter((configuration) => !isManagedLaunch(configuration)),
+      ...nextConfigurations
+    ]
+  });
+}
+
+async function ensureGitignoreEntries(workspace: string): Promise<void> {
+  const gitignorePath = path.join(workspace, ".gitignore");
+  const requiredEntries = ["build/", ".vscode/*.log", "*.obj", "*.pdb"];
+
+  if (!(await pathExists(gitignorePath))) {
+    await writeTextFile(gitignorePath, `${requiredEntries.join("\n")}\n`);
+    return;
+  }
+
+  const current = await fs.readFile(gitignorePath, "utf-8");
+  const normalized = current.replace(/\r\n/g, "\n");
+  const existingEntries = new Set(
+    normalized
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  );
+  const missingEntries = requiredEntries.filter((entry) => !existingEntries.has(entry));
+  if (missingEntries.length === 0) {
+    return;
+  }
+
+  const suffix = normalized.endsWith("\n") || normalized.length === 0 ? "" : "\n";
+  await writeTextFile(gitignorePath, `${normalized}${suffix}${missingEntries.join("\n")}\n`);
+}
+
 export async function syncGeneratedFiles(
   workspace: string,
   config: ProjectConfig,
   toolchain: Toolchain
 ): Promise<void> {
   const backend = getDependencyBackendAdapter(config.dependencyBackend);
-  const generatedRoot = path.join(workspace, GENERATED_ROOT);
+  const generatedRoot = getWorkspaceGeneratedRoot(workspace);
+  await removeLegacyGeneratedFiles(workspace);
   await ensureDir(generatedRoot);
   await ensureDir(path.join(workspace, ".vscode"));
   await removeStaleGeneratedFiles(generatedRoot, backend.getStaleGeneratedFiles());
 
+  await writeTextFile(
+    path.join(generatedRoot, GENERATED_NOTICE_FILENAME),
+    createGeneratedRootNotice()
+  );
   await writeTextFile(
     path.join(generatedRoot, "CMakeLists.txt"),
     createGeneratedCMakeLists(config)
@@ -206,8 +354,8 @@ export async function syncGeneratedFiles(
     }
   }
 
-  await writeJsonFile(path.join(workspace, ".vscode", "tasks.json"), createVSCodeTasks(config));
-  await writeJsonFile(path.join(workspace, ".vscode", "launch.json"), createVSCodeLaunch(config));
+  await writeManagedVSCodeTasks(workspace, createVSCodeTasks(config));
+  await writeManagedVSCodeLaunch(workspace, createVSCodeLaunch(config));
 }
 
 function buildToolEnv(
@@ -382,7 +530,7 @@ function createVSCodeTasks(config: ProjectConfig): Record<string, unknown> {
           label: `cppx: configure ${preset.name}`,
           type: "shell",
           command: `cmake --preset ${preset.name}`,
-          options: { cwd: "${workspaceFolder}/.cppx" },
+          options: { cwd: VSCODE_GENERATED_ROOT },
           ...(backendIntegration.configureDependsOn.length > 0
             ? {
                 dependsOn:
@@ -397,7 +545,7 @@ function createVSCodeTasks(config: ProjectConfig): Record<string, unknown> {
           label: `cppx: build ${preset.name}`,
           type: "shell",
           command: `cmake --build --preset ${preset.name}`,
-          options: { cwd: "${workspaceFolder}/.cppx" },
+          options: { cwd: VSCODE_GENERATED_ROOT },
           dependsOn: `cppx: configure ${preset.name}`,
           group: "build"
         },
@@ -405,7 +553,7 @@ function createVSCodeTasks(config: ProjectConfig): Record<string, unknown> {
           label: `cppx: test ${preset.name}`,
           type: "shell",
           command: `ctest --preset ${preset.name} --output-on-failure`,
-          options: { cwd: "${workspaceFolder}/.cppx" },
+          options: { cwd: VSCODE_GENERATED_ROOT },
           dependsOn: `cppx: build ${preset.name}`,
           group: "test"
         },
@@ -413,7 +561,7 @@ function createVSCodeTasks(config: ProjectConfig): Record<string, unknown> {
           label: `cppx: pack ${preset.name}`,
           type: "shell",
           command: `cpack --preset ${preset.name}`,
-          options: { cwd: "${workspaceFolder}/.cppx" },
+          options: { cwd: VSCODE_GENERATED_ROOT },
           dependsOn: `cppx: build ${preset.name}`,
           group: "build"
         }
@@ -458,7 +606,7 @@ export async function saveProjectConfig(
   const merged = mergeProjectConfigPayload(current, payload, path.basename(workspace));
 
   await writeProjectConfigToml(workspace, merged);
-  return merged;
+  return readProjectConfig(workspace);
 }
 
 export async function syncProjectFiles(
@@ -467,6 +615,7 @@ export async function syncProjectFiles(
 ): Promise<void> {
   const config = await readProjectConfig(workspace);
   await syncGeneratedFiles(workspace, config, toolchain);
+  await ensureGitignoreEntries(workspace);
 }
 
 export async function ensureRunnablePreset(
@@ -481,7 +630,10 @@ export async function initProject(
   workspace: string,
   projectName: string | undefined,
   toolchain: Toolchain,
-  logger: CppxLogger
+  logger: CppxLogger,
+  options: {
+    dependencyBackend?: "vcpkg" | "conan" | "none";
+  } = {}
 ): Promise<string> {
   const parentWorkspace = path.resolve(workspace);
   const requestedName = projectName?.trim() ?? "";
@@ -511,6 +663,9 @@ export async function initProject(
   await ensureDir(path.join(targetWorkspace, ".cppx"));
 
   const config = defaultProjectConfig(name, toolchain.compilerFamily);
+  if (options.dependencyBackend) {
+    config.dependencyBackend = options.dependencyBackend;
+  }
   await writeProjectConfigToml(targetWorkspace, config);
 
   const sourcePath = path.join(targetWorkspace, config.sourceFile);
@@ -519,11 +674,7 @@ export async function initProject(
   }
 
   await syncGeneratedFiles(targetWorkspace, config, toolchain);
-
-  const gitignorePath = path.join(targetWorkspace, ".gitignore");
-  if (!(await pathExists(gitignorePath))) {
-    await writeTextFile(gitignorePath, "build/\n.vscode/*.log\n*.obj\n*.pdb\n");
-  }
+  await ensureGitignoreEntries(targetWorkspace);
 
   logger.success("init", `프로젝트 '${name}' 초기화 완료: ${targetWorkspace}`);
   return targetWorkspace;
@@ -534,10 +685,9 @@ export async function cleanupLegacyWorkspaceFiles(
   logger: CppxLogger
 ): Promise<void> {
   const legacyPaths = [
-    "CMakeLists.txt",
-    "CMakePresets.json",
-    "vcpkg.json"
-  ].map((file) => path.join(workspace, file));
+    ...LEGACY_ROOT_GENERATED_FILES.map((file) => path.join(workspace, file)),
+    ...LEGACY_USER_ROOT_GENERATED_FILES.map((file) => path.join(workspace, ".cppx", file))
+  ];
 
   for (const target of legacyPaths) {
     if (await pathExists(target)) {
@@ -580,7 +730,7 @@ export async function buildWithPreset(
   const presetConfig = getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
 
-  const generatedRoot = path.join(workspace, GENERATED_ROOT);
+  const generatedRoot = getWorkspaceGeneratedRoot(workspace);
   await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
     config,
     toolchain,
@@ -650,7 +800,7 @@ export async function runPresetBinary(
       action: "run",
       command: binary,
       cwd: workspace,
-      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
+      env: buildToolEnv(config, toolchain, getWorkspaceGeneratedRoot(workspace))
     },
     logger
   );
@@ -674,7 +824,7 @@ export async function testPreset(
   await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
     config,
     toolchain,
-    path.join(workspace, GENERATED_ROOT),
+    getWorkspaceGeneratedRoot(workspace),
     logger
   );
 
@@ -683,8 +833,8 @@ export async function testPreset(
       action: "test",
       command: ctest,
       args: ["--preset", preset, "--output-on-failure"],
-      cwd: path.join(workspace, GENERATED_ROOT),
-      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
+      cwd: getWorkspaceGeneratedRoot(workspace),
+      env: buildToolEnv(config, toolchain, getWorkspaceGeneratedRoot(workspace))
     },
     logger
   );
@@ -708,7 +858,7 @@ export async function packagePreset(
   await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
     config,
     toolchain,
-    path.join(workspace, GENERATED_ROOT),
+    getWorkspaceGeneratedRoot(workspace),
     logger
   );
 
@@ -717,8 +867,8 @@ export async function packagePreset(
       action: "pack",
       command: cpack,
       args: ["--preset", preset],
-      cwd: path.join(workspace, GENERATED_ROOT),
-      env: buildToolEnv(config, toolchain, path.join(workspace, GENERATED_ROOT))
+      cwd: getWorkspaceGeneratedRoot(workspace),
+      env: buildToolEnv(config, toolchain, getWorkspaceGeneratedRoot(workspace))
     },
     logger
   );

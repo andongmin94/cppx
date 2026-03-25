@@ -13,6 +13,7 @@ import {
   createLogger,
   createTempDir,
   createToolchain,
+  generatedRoot,
   readJson,
   readText,
   removeDir
@@ -34,10 +35,12 @@ test("syncProjectFiles removes vcpkg artifacts for backend none", async () => {
 
     await syncProjectFiles(workspace, createToolchain());
 
-    await assert.rejects(() => readText(path.join(workspace, ".cppx", "vcpkg.json")));
-    await assert.rejects(() => readText(path.join(workspace, ".cppx", "conanfile.txt")));
+    await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
+    await assert.rejects(() => readText(path.join(generatedRoot(workspace), "conanfile.txt")));
 
-    const presets = await readJson<Record<string, any>>(path.join(workspace, ".cppx", "CMakePresets.json"));
+    const presets = await readJson<Record<string, any>>(
+      path.join(generatedRoot(workspace), "CMakePresets.json")
+    );
     assert.equal(presets.configurePresets[0].toolchainFile, undefined);
     assert.equal(presets.configurePresets[0].environment, undefined);
     assert.equal(presets.configurePresets[0].cacheVariables.VCPKG_TARGET_TRIPLET, undefined);
@@ -62,11 +65,11 @@ test("syncProjectFiles writes conanfile for conan backend", async () => {
 
     await syncProjectFiles(workspace, createToolchain());
 
-    const conanfile = await readText(path.join(workspace, ".cppx", "conanfile.txt"));
+    const conanfile = await readText(path.join(generatedRoot(workspace), "conanfile.txt"));
     assert.match(conanfile, /\[requires\]/);
     assert.match(conanfile, /fmt/);
     assert.match(conanfile, /spdlog/);
-    await assert.rejects(() => readText(path.join(workspace, ".cppx", "vcpkg.json")));
+    await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
   } finally {
     await removeDir(workspace);
   }

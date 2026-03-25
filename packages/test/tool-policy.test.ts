@@ -28,6 +28,7 @@ function createRichToolRecord(overrides: Partial<{
   arch: string;
   compilerFamily: "mingw" | "msvc";
   catalogId: string;
+  verifiedSha256: string;
 }> = {}) {
   return {
     name: "cmake" as const,
@@ -42,7 +43,8 @@ function createRichToolRecord(overrides: Partial<{
     platform: overrides.platform,
     arch: overrides.arch,
     compilerFamily: overrides.compilerFamily,
-    catalogId: overrides.catalogId
+    catalogId: overrides.catalogId,
+    ...(overrides.verifiedSha256 ? { verifiedSha256: overrides.verifiedSha256 } : {})
   };
 }
 
@@ -119,6 +121,8 @@ test("tool status details can represent managed and system metadata", async () =
         requestedVersion: "default",
         resolvedVersion: "3.30.5",
         executable: "C:\\cppx-tools\\cmake\\bin\\cmake.exe"
+        ,
+        verifiedSha256: "5ab6e1faf20256ee4f04886597e8b6c3b1bd1297b58a68a58511af013710004b"
       },
       cxx: {
         ready: true,
@@ -135,6 +139,10 @@ test("tool status details can represent managed and system metadata", async () =
   assert.equal(status.details?.cxx?.mode, "system");
   assert.equal(status.details?.cmake?.resolvedVersion, "3.30.5");
   assert.equal(status.details?.cxx?.sourceKind, "system-detected");
+  assert.equal(
+    status.details?.cmake?.verifiedSha256,
+    "5ab6e1faf20256ee4f04886597e8b6c3b1bd1297b58a68a58511af013710004b"
+  );
 });
 
 test("exact version archive installs do not reuse a mismatched existing manifest", () => {
@@ -157,6 +165,7 @@ test("exact version archive installs do not reuse a mismatched existing manifest
       {
         version: "3.30.5",
         urls: ["https://example.com/cmake.zip"],
+        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         executable: "cmake.exe",
         sourceKind: "catalog-archive",
         requestedVersion: "3.30.5",
@@ -174,13 +183,15 @@ test("exact version archive installs do not reuse a mismatched existing manifest
           sourceKind: "catalog-archive",
           requestedVersion: "3.30.5",
           resolvedVersion: "3.30.5",
-          catalogId: "cmake-3.30.5-windows-x64"
+          catalogId: "cmake-3.30.5-windows-x64",
+          verifiedSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         }),
         version: "3.30.5"
       },
       {
         version: "3.30.5",
         urls: ["https://example.com/cmake.zip"],
+        sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         executable: "cmake.exe",
         sourceKind: "catalog-archive",
         requestedVersion: "3.30.5",
@@ -188,5 +199,31 @@ test("exact version archive installs do not reuse a mismatched existing manifest
       }
     ),
     true
+  );
+
+  assert.equal(
+    shouldReuseManagedArchiveTool(
+      {
+        ...createRichToolRecord({
+          mode: "managed",
+          sourceKind: "catalog-archive",
+          requestedVersion: "3.30.5",
+          resolvedVersion: "3.30.5",
+          catalogId: "cmake-3.30.5-windows-x64",
+          verifiedSha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }),
+        version: "3.30.5"
+      },
+      {
+        version: "3.30.5",
+        urls: ["https://example.com/cmake.zip"],
+        sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        executable: "cmake.exe",
+        sourceKind: "catalog-archive",
+        requestedVersion: "3.30.5",
+        catalogId: "cmake-3.30.5-windows-x64"
+      }
+    ),
+    false
   );
 });

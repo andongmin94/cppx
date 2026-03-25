@@ -13,8 +13,10 @@ import {
   createLogger,
   createTempDir,
   createToolchain,
+  generatedRoot,
   readJson,
   removeDir,
+  writeJson,
   writeText
 } from "./support/helpers";
 
@@ -134,8 +136,18 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
       }>;
       buildPresets: Array<{ name: string; configurePreset: string }>;
       testPresets: Array<{ name: string; configurePreset: string }>;
-      packagePresets: Array<{ name: string; configurePreset: string }>;
-    }>(path.join(workspace, ".cppx", "CMakePresets.json"));
+      packagePresets: Array<{
+        name: string;
+        configurePreset: string;
+        generators: string[];
+        output?: {
+          packageName?: string;
+          packageVersion?: string;
+          vendorName?: string;
+          packageDirectory?: string;
+        };
+      }>;
+    }>(path.join(generatedRoot(workspace), "CMakePresets.json"));
 
     assert.deepEqual(
       presets.configurePresets.map((preset) => preset.name),
@@ -153,6 +165,11 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
       presets.packagePresets.map((preset) => preset.name),
       ["asan-x64", "release-lto", "arm64-release"]
     );
+    assert.deepEqual(presets.packagePresets[0]?.generators, ["ZIP"]);
+    assert.equal(presets.packagePresets[0]?.output?.packageName, "matrix-app");
+    assert.equal(presets.packagePresets[0]?.output?.vendorName, "matrix-app");
+    assert.equal(presets.packagePresets[0]?.output?.packageVersion, "0.1.0");
+    assert.match(presets.packagePresets[0]?.output?.packageDirectory ?? "", /dist$/);
     assert.equal(presets.configurePresets[0]?.displayName, "ASan x64");
     assert.equal(
       presets.configurePresets[2]?.cacheVariables.VCPKG_TARGET_TRIPLET,
@@ -161,7 +178,7 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
     assert.match(presets.configurePresets[0]?.toolchainFile ?? "", /vcpkg\.cmake/i);
 
     const tasks = await readJson<{
-      tasks: Array<{ label: string }>;
+      tasks: Array<{ label: string; options?: { cwd?: string } }>;
     }>(path.join(workspace, ".vscode", "tasks.json"));
     const labels = tasks.tasks.map((task) => task.label);
     assert.deepEqual(labels, [
@@ -181,6 +198,11 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
       "cppx: run release-lto"
     ]);
     assert.ok(!labels.includes("cppx: run arm64-release"));
+    assert.ok(
+      tasks.tasks
+        .filter((task) => task.label.startsWith("cppx: configure "))
+        .every((task) => task.options?.cwd === "${workspaceFolder}/build/.cppx")
+    );
 
     const launch = await readJson<{
       configurations: Array<{ name: string; program: string }>;
@@ -194,6 +216,81 @@ test("syncProjectFiles generates preset matrix artifacts and vscode entries from
         (configuration) => !configuration.program.includes("arm64-release")
       )
     );
+  } finally {
+    await removeDir(workspace);
+  }
+});
+
+test("syncProjectFiles preserves user vscode entries while replacing cppx-managed ones", async () => {
+  const workspace = await createTempDir("vscode-merge");
+  const { logger } = createLogger();
+
+  try {
+    await initProject(workspace, "merge-app", createToolchain(), logger);
+
+    await writeJson(path.join(workspace, ".vscode", "tasks.json"), {
+      version: "2.0.0",
+      inputs: [{ id: "userInput", type: "promptString", description: "custom" }],
+      tasks: [
+        {
+          label: "user: lint",
+          type: "shell",
+          command: "npm run lint"
+        },
+        {
+          label: "cppx: build debug-x64",
+          type: "shell",
+          command: "echo stale"
+        }
+      ]
+    });
+    await writeJson(path.join(workspace, ".vscode", "launch.json"), {
+      version: "0.2.0",
+      compounds: [{ name: "User Compound", configurations: ["User Launch"] }],
+      configurations: [
+        {
+          name: "User Launch",
+          type: "cppdbg",
+          request: "launch",
+          program: "custom.exe"
+        },
+        {
+          name: "cppx: Launch Debug x64",
+          type: "cppdbg",
+          request: "launch",
+          program: "stale.exe"
+        }
+      ]
+    });
+
+    await syncProjectFiles(workspace, createToolchain());
+
+    const tasks = await readJson<{
+      inputs?: Array<{ id: string }>;
+      tasks: Array<{ label: string; command: string; options?: { cwd?: string } }>;
+    }>(path.join(workspace, ".vscode", "tasks.json"));
+    assert.equal(tasks.inputs?.[0]?.id, "userInput");
+    assert.ok(tasks.tasks.some((task) => task.label === "user: lint" && task.command === "npm run lint"));
+    const managedBuild = tasks.tasks.find((task) => task.label === "cppx: build debug-x64");
+    assert.equal(managedBuild?.command, "cmake --build --preset debug-x64");
+    assert.equal(managedBuild?.options?.cwd, "${workspaceFolder}/build/.cppx");
+
+    const launch = await readJson<{
+      compounds?: Array<{ name: string }>;
+      configurations: Array<{ name: string; program: string }>;
+    }>(path.join(workspace, ".vscode", "launch.json"));
+    assert.equal(launch.compounds?.[0]?.name, "User Compound");
+    assert.ok(
+      launch.configurations.some(
+        (configuration) =>
+          configuration.name === "User Launch" && configuration.program === "custom.exe"
+      )
+    );
+    const managedLaunch = launch.configurations.find(
+      (configuration) => configuration.name === "cppx: Launch Debug x64"
+    );
+    assert.ok(managedLaunch);
+    assert.notEqual(managedLaunch?.program, "stale.exe");
   } finally {
     await removeDir(workspace);
   }

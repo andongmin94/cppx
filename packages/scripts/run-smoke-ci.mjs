@@ -31,6 +31,23 @@ async function main() {
   });
 
   if (code !== 0) {
+    const missingTools = output.includes("누락된 도구:");
+    const runningInCi =
+      process.env.CI === "true" ||
+      process.env.CI === "1" ||
+      process.env.GITHUB_ACTIONS === "true";
+
+    if (missingTools && !runningInCi) {
+      const tail = output
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .slice(-20)
+        .join("\n");
+
+      console.log(`Smoke skipped: ${tail}`);
+      return;
+    }
+
     const tail = output
       .split(/\r?\n/)
       .filter((line) => line.trim().length > 0)
