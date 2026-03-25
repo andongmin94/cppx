@@ -21,7 +21,7 @@ function quoteForSh(value: string): string {
 
 function getPosixDataHome(platform: HostPlatform): string {
   if (platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support");
+    return path.join(process.env.HOME ?? os.homedir(), "Library", "Application Support");
   }
 
   return process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");

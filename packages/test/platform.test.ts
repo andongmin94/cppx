@@ -99,3 +99,20 @@ test("darwin host adapter uses Application Support and native triplets", async (
   assert.ok(adapter.normalizePath("/tmp/demo").endsWith("/tmp/demo"));
   assert.equal(adapter.comparePaths("/tmp/demo", "/tmp/demo"), 0);
 });
+
+test("darwin host adapter honors HOME overrides for app data resolution", async () => {
+  const homeRoot = await createTempDir("platform-darwin-home");
+
+  try {
+    await withEnv("HOME", homeRoot, async () => {
+      const adapter = createHostAdapter("darwin");
+      const expectedRoot = path.join(homeRoot, "Library", "Application Support");
+
+      assert.equal(adapter.getAppDataRoot(), expectedRoot);
+      assert.equal(adapter.getCppxRoot(), path.join(expectedRoot, "cppx"));
+      assert.equal(adapter.getDownloadsRoot(), path.join(expectedRoot, "cppx", "downloads"));
+    });
+  } finally {
+    await removeDir(homeRoot);
+  }
+});
