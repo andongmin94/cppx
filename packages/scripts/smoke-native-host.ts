@@ -54,23 +54,32 @@ function getSmokeToolMode(): "managed" | "system" {
     : "system";
 }
 
+function getSmokeCxxMode(toolMode: "managed" | "system"): "managed" | "system" {
+  const raw = (process.env.CPPX_SMOKE_CXX_MODE ?? "").trim().toLowerCase();
+  if (raw === "managed" || raw === "system") {
+    return raw;
+  }
+  return toolMode;
+}
+
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
   const dependencyBackend = getSmokeBackend();
   const toolMode = getSmokeToolMode();
+  const cxxMode = getSmokeCxxMode(toolMode);
   const toolPolicy = {
     mode: toolMode,
     version: toolMode === "managed" ? "default" : "latest"
   } as const;
   const cxxPolicy =
     process.platform === "win32"
-      ? toolMode === "managed"
+      ? cxxMode === "managed"
         ? { mode: "managed" as const, version: "latest", preferredFamily: "mingw" as const }
         : { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
       : {
-          mode: toolMode,
-          version: toolMode === "managed" ? "latest" : "latest",
+          mode: cxxMode,
+          version: cxxMode === "managed" ? "latest" : "latest",
           preferredFamily: "mingw" as const
         };
   const toolPolicies = {

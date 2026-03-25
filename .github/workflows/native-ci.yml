@@ -108,6 +108,7 @@ jobs:
         shell: pwsh
         run: |
           $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "system"
           $env:CPPX_SMOKE_BACKEND = "vcpkg"
           node ./scripts/run-smoke-ci.mjs
 
@@ -116,6 +117,7 @@ jobs:
         shell: pwsh
         run: |
           $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "system"
           $env:CPPX_SMOKE_BACKEND = "conan"
           node ./scripts/run-smoke-ci.mjs
 
