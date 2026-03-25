@@ -112,6 +112,7 @@ test("tool status details can represent managed and system metadata", async () =
     cmake: true,
     ninja: false,
     vcpkg: true,
+    conan: false,
     cxx: true,
     details: {
       cmake: {

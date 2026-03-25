@@ -36,6 +36,19 @@ function getNativePosixTriplet(platform: HostPlatform): string {
   return `${arch}-linux`;
 }
 
+function getDefaultManagedModeForPosixTool(
+  platform: Extract<HostPlatform, "darwin" | "linux">,
+  tool: ToolName
+): "managed" | "system" {
+  if (platform === "darwin") {
+    return tool === "cxx" || tool === "cmake" || tool === "ninja" || tool === "vcpkg" || tool === "conan"
+      ? "managed"
+      : "system";
+  }
+
+  return "system";
+}
+
 function createPosixHostAdapter(platform: Extract<HostPlatform, "darwin" | "linux">): HostAdapter {
   const suffix = getDefaultExecutableSuffix(platform);
 
@@ -95,8 +108,8 @@ function createPosixHostAdapter(platform: Extract<HostPlatform, "darwin" | "linu
       return "none";
     },
 
-    getDefaultToolMode(_tool: ToolName, _compilerFamily?: CompilerFamily) {
-      return "system";
+    getDefaultToolMode(tool: ToolName, _compilerFamily?: CompilerFamily) {
+      return getDefaultManagedModeForPosixTool(platform, tool);
     },
 
     getDefaultTargetTriplet(_compilerFamily: CompilerFamily): string {

@@ -10,8 +10,18 @@
 export type CompilerPreference = "mingw" | "msvc";
 export type ToolInstallMode = "managed" | "system";
 export type DependencyBackend = "vcpkg" | "conan" | "none";
-export type ToolId = "cmake" | "ninja" | "vcpkg" | "cxx";
+export type ToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 export type HostPlatformPayload = "win32" | "darwin" | "linux";
+export type ToolLifecycleProvider =
+  | "archive"
+  | "git"
+  | "homebrew"
+  | "apt"
+  | "system"
+  | "msvc"
+  | "unknown";
+export type ToolOwnership = "cppx" | "external" | "unknown";
+export type HostSupportTier = "official" | "best-effort";
 
 export type LogLevel =
   | "info"
@@ -50,6 +60,7 @@ export interface ProjectToolPoliciesPayload {
   cmake?: ToolPolicyPayload;
   ninja?: ToolPolicyPayload;
   vcpkg?: ToolPolicyPayload;
+  conan?: ToolPolicyPayload;
   cxx?: CompilerToolPolicyPayload;
 }
 
@@ -98,6 +109,29 @@ export interface HostDefaultsPayload {
   defaultPreset: string;
   dependencyBackend: DependencyBackend;
   toolPolicies: Required<ProjectToolPoliciesPayload>;
+  hostSupport: HostSupportPayload;
+  toolCapabilities: Record<ToolId, ToolLifecycleCapabilities>;
+}
+
+export interface HostSupportPayload {
+  platform: HostPlatformPayload;
+  arch: string;
+  hostLabel: string;
+  tier: HostSupportTier;
+  managedLifecycleReady: boolean;
+  recommendedProvider: ToolLifecycleProvider;
+  distroId?: string;
+  distroVersion?: string;
+  notes: string[];
+}
+
+export interface ToolLifecycleCapabilities {
+  provider: ToolLifecycleProvider;
+  detect: boolean;
+  install: boolean;
+  repair: boolean;
+  remove: boolean;
+  note?: string;
 }
 
 export interface RunCommandPayload {
@@ -124,6 +158,7 @@ export interface ToolStatus {
   cmake: boolean;
   ninja: boolean;
   vcpkg: boolean;
+  conan: boolean;
   cxx: boolean;
   details?: Partial<Record<ToolId, ToolStatusDetail>>;
 }
@@ -136,6 +171,9 @@ export interface ToolStatusDetail {
   resolvedVersion?: string;
   executable?: string;
   verifiedSha256?: string;
+  provider?: ToolLifecycleProvider;
+  ownership?: ToolOwnership;
+  capabilities?: ToolLifecycleCapabilities;
 }
 
 export interface CompilerScanResult {

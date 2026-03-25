@@ -38,10 +38,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build build-essential
 
-      - name: Install macOS prerequisites
-        if: runner.os == 'macOS'
-        run: brew install cmake ninja
-
       - name: Install Windows prerequisites
         if: runner.os == 'Windows'
         shell: pwsh
@@ -75,6 +71,7 @@ jobs:
         run: npm run cppx -- install-tools --compiler msvc
 
       - name: Native smoke
+        if: runner.os != 'macOS'
         shell: pwsh
         run: |
           function Format-GitHubAnnotation([string]$value) {
@@ -105,6 +102,22 @@ jobs:
             Write-Host "::error title=Native smoke failure::$(Format-GitHubAnnotation($tail))"
             exit $exitCode
           }
+
+      - name: macOS managed vcpkg smoke
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "vcpkg"
+          node ./scripts/run-smoke-ci.mjs
+
+      - name: macOS managed conan smoke
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "conan"
+          node ./scripts/run-smoke-ci.mjs
 
       - name: Windows managed smoke
         if: runner.os == 'Windows'

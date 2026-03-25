@@ -13,8 +13,17 @@ import type {
   CompilerScanResult,
   MsvcCandidate,
   ProjectToolPoliciesPayload,
+  ToolLifecycleCapabilities,
+  ToolOwnership,
+  ToolLifecycleProvider,
   ToolStatus
 } from "@shared/contracts";
+import {
+  inferOwnership,
+  inferProviderFromSourceKind,
+  isPathManagedByHomebrew,
+  resolveToolLifecycleCapabilities
+} from "./host-support";
 import { runSpawn } from "./command-runner";
 import { CppxError } from "./errors";
 import { ensureDir, findFileRecursive, pathExists } from "./fs-utils";
@@ -85,6 +94,8 @@ interface ResolvedToolInfo {
   catalogId?: string;
   verifiedSha256?: string;
   baseEnv?: NodeJS.ProcessEnv;
+  provider?: ToolLifecycleProvider;
+  ownership?: ToolOwnership;
 }
 
 interface ResolvedToolExecutable {
@@ -98,6 +109,8 @@ interface ResolvedToolExecutable {
   compilerFamily?: CompilerFamily;
   catalogId?: string;
   verifiedSha256?: string;
+  provider?: ToolLifecycleProvider;
+  ownership?: ToolOwnership;
 }
 
 export interface ToolResolutionDetail {
@@ -110,12 +123,16 @@ export interface ToolResolutionDetail {
   compilerFamily?: CompilerFamily;
   catalogId?: string;
   verifiedSha256?: string;
+  provider?: ToolLifecycleProvider;
+  ownership?: ToolOwnership;
+  capabilities?: ToolLifecycleCapabilities;
 }
 
 export interface ToolResolutionSnapshot {
   cmake: ToolResolutionDetail;
   ninja: ToolResolutionDetail;
   vcpkg: ToolResolutionDetail;
+  conan: ToolResolutionDetail;
   cxx: ToolResolutionDetail;
 }
 
@@ -123,6 +140,7 @@ interface ResolvedToolPolicies {
   cmake: ToolPolicy;
   ninja: ToolPolicy;
   vcpkg: ToolPolicy;
+  conan: ToolPolicy;
   cxx: CompilerToolPolicy;
 }
 
@@ -133,6 +151,7 @@ const EXECUTABLE_CANDIDATES_BY_TOOL: Record<ToolName, string[]> = {
   cmake: [hostAdapter.getExecutableName("cmake")],
   ninja: [hostAdapter.getExecutableName("ninja")],
   vcpkg: [hostAdapter.getExecutableName("vcpkg")],
+  conan: [hostAdapter.getExecutableName("conan"), "conan"],
   cxx: [
     hostAdapter.getExecutableName("clang++"),
     hostAdapter.getExecutableName("g++"),
@@ -230,6 +249,20 @@ function getDefaultToolVersion(
   return DEFAULT_TOOL_VERSION_TOKEN;
 }
 
+function ensureManagedLifecycleSupportedOrThrow(
+  tool: ToolName,
+  capabilities: ToolLifecycleCapabilities
+): void {
+  if (capabilities.install) {
+    return;
+  }
+
+  throw new CppxError(
+    `${tool} managed 수명주기는 현재 host에서 아직 지원되지 않습니다.`,
+    capabilities.note ?? `provider=${capabilities.provider}`
+  );
+}
+
 export function isPinnedToolVersion(version: string): boolean {
   const normalizedVersion = version.trim();
   return (
@@ -265,6 +298,7 @@ function resolveRequestedPolicies(
   const defaultCmakeMode = getDefaultToolMode("cmake", compilerFamily);
   const defaultNinjaMode = getDefaultToolMode("ninja", compilerFamily);
   const defaultVcpkgMode = getDefaultToolMode("vcpkg", compilerFamily);
+  const defaultConanMode = getDefaultToolMode("conan", compilerFamily);
   const defaultCxxMode = getDefaultToolMode("cxx", compilerFamily);
 
   return {
@@ -287,6 +321,13 @@ function resolveRequestedPolicies(
       version: normalizeToolVersion(
         toolPolicies?.vcpkg?.version,
         getDefaultToolVersion("vcpkg", defaultVcpkgMode, compilerFamily)
+      )
+    },
+    conan: {
+      mode: normalizeToolMode(toolPolicies?.conan?.mode, defaultConanMode),
+      version: normalizeToolVersion(
+        toolPolicies?.conan?.version,
+        getDefaultToolVersion("conan", defaultConanMode, compilerFamily)
       )
     },
     cxx: {
@@ -774,7 +815,9 @@ async function registerTool(record: ResolvedToolInfo): Promise<void> {
     arch: getHostArchLabel(),
     compilerFamily: record.compilerFamily,
     catalogId: record.catalogId,
-    verifiedSha256: record.verifiedSha256
+    verifiedSha256: record.verifiedSha256,
+    provider: record.provider,
+    ownership: record.ownership
   });
 }
 
@@ -804,6 +847,206 @@ export async function findExecutableOnPath(...candidates: string[]): Promise<str
   return resolveExecutableFromPath(candidates);
 }
 
+interface HomebrewToolSpec {
+  formula: string;
+  executable: string;
+  compilerFamily?: CompilerFamily;
+}
+
+function getHomebrewToolSpec(tool: ToolName): HomebrewToolSpec {
+  switch (tool) {
+    case "cmake":
+      return { formula: "cmake", executable: "cmake" };
+    case "ninja":
+      return { formula: "ninja", executable: "ninja" };
+    case "vcpkg":
+      throw new CppxError("vcpkg는 Homebrew가 아니라 아카이브 bootstrap 경로를 사용합니다.");
+    case "conan":
+      return { formula: "conan", executable: "conan" };
+    case "cxx":
+      return {
+        formula: "llvm",
+        executable: "clang++",
+        compilerFamily: "mingw"
+      };
+    default: {
+      const neverTool: never = tool;
+      throw new CppxError(`지원하지 않는 Homebrew 도구: ${String(neverTool)}`);
+    }
+  }
+}
+
+async function resolveHomebrewExecutable(): Promise<string | null> {
+  if (hostAdapter.platform !== "darwin") {
+    return null;
+  }
+
+  return resolveExecutableFromPath(["brew"]);
+}
+
+async function resolveHomebrewPrefix(brewExecutable: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile(brewExecutable, ["--prefix"], {
+      windowsHide: true
+    });
+    const prefix = stdout.trim();
+    return prefix.length > 0 ? prefix : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getHomebrewFormulaVersion(
+  brewExecutable: string,
+  formula: string
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFile(brewExecutable, ["list", "--versions", formula], {
+      windowsHide: true
+    });
+    const line = stdout.trim();
+    if (!line) {
+      return null;
+    }
+
+    const [name, ...versions] = line.split(/\s+/);
+    if (name !== formula || versions.length === 0) {
+      return null;
+    }
+
+    return versions[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveHomebrewFormulaExecutable(
+  brewExecutable: string,
+  tool: ToolName
+): Promise<{ executable: string; root: string; version: string; compilerFamily?: CompilerFamily } | null> {
+  const spec = getHomebrewToolSpec(tool);
+  const version = await getHomebrewFormulaVersion(brewExecutable, spec.formula);
+  if (!version) {
+    return null;
+  }
+
+  const { stdout } = await execFile(brewExecutable, ["--prefix", spec.formula], {
+    windowsHide: true
+  });
+  const formulaRoot = stdout.trim();
+  if (!formulaRoot) {
+    return null;
+  }
+
+  const executable = path.join(formulaRoot, "bin", hostAdapter.getExecutableName(spec.executable));
+  if (!(await pathExists(executable))) {
+    return null;
+  }
+
+  return {
+    executable,
+    root: formulaRoot,
+    version,
+    compilerFamily: spec.compilerFamily
+  };
+}
+
+function ensureSupportedHomebrewVersionPolicy(
+  tool: ToolName,
+  policy: ToolPolicy | CompilerToolPolicy
+): void {
+  if (!isPinnedToolVersion(policy.version)) {
+    return;
+  }
+
+  throw new CppxError(
+    `${tool} Homebrew exact version은 아직 지원되지 않습니다.`,
+    `requested=${policy.version}`
+  );
+}
+
+async function installHomebrewManagedTool(
+  tool: Exclude<ToolName, "vcpkg">,
+  policy: ToolPolicy | CompilerToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
+  if (hostAdapter.platform !== "darwin") {
+    throw new CppxError(`${tool} Homebrew managed 경로는 macOS에서만 지원됩니다.`);
+  }
+
+  ensureSupportedHomebrewVersionPolicy(tool, policy);
+
+  const brewExecutable = await resolveHomebrewExecutable();
+  if (!brewExecutable) {
+    throw new CppxError(
+      "Homebrew를 찾지 못했습니다.",
+      "macOS managed 도구 설치를 사용하려면 먼저 Homebrew가 준비되어야 합니다."
+    );
+  }
+
+  const spec = getHomebrewToolSpec(tool);
+  const manifest = await readToolManifest();
+  const existingRecord = manifest.tools[tool];
+  const existing = await resolveHomebrewFormulaExecutable(brewExecutable, tool);
+
+  if (existing) {
+    const ownedByCppx =
+      existingRecord?.provider === "homebrew" &&
+      (existingRecord.ownership ?? "unknown") === "cppx" &&
+      (existingRecord.mode ?? "managed") === "managed";
+    const record: ResolvedToolInfo = {
+      name: tool,
+      executable: existing.executable,
+      root: existing.root,
+      version: existing.version,
+      mode: "managed",
+      sourceKind: "homebrew-managed",
+      requestedVersion: policy.version,
+      resolvedVersion: existing.version,
+      compilerFamily: existing.compilerFamily,
+      provider: "homebrew",
+      ownership: ownedByCppx ? "cppx" : "external"
+    };
+    logger.info("install-tools", `${tool} 이미 설치됨 (Homebrew: ${spec.formula})`);
+    await registerTool(record);
+    return record;
+  }
+
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: brewExecutable,
+      args: ["install", spec.formula]
+    },
+    logger
+  );
+
+  const installed = await resolveHomebrewFormulaExecutable(brewExecutable, tool);
+  if (!installed) {
+    throw new CppxError(
+      `${tool} Homebrew 설치 후 실행 파일을 찾지 못했습니다.`,
+      spec.formula
+    );
+  }
+
+  const record: ResolvedToolInfo = {
+    name: tool,
+    executable: installed.executable,
+    root: installed.root,
+    version: installed.version,
+    mode: "managed",
+    sourceKind: "homebrew-managed",
+    requestedVersion: policy.version,
+    resolvedVersion: installed.version,
+    compilerFamily: installed.compilerFamily,
+    provider: "homebrew",
+    ownership: "cppx"
+  };
+  await registerTool(record);
+  logger.success("install-tools", `${tool} 설치됨: ${installed.executable}`);
+  return record;
+}
+
 async function resolveSystemTool(
   tool: Exclude<ToolName, "cxx">,
   policy: ToolPolicy
@@ -813,6 +1056,11 @@ async function resolveSystemTool(
     return null;
   }
 
+  const provider =
+    hostAdapter.platform === "darwin" && isPathManagedByHomebrew(executable)
+      ? "homebrew"
+      : "system";
+
   return {
     name: tool,
     executable,
@@ -821,7 +1069,9 @@ async function resolveSystemTool(
     mode: "system",
     sourceKind: "system-detected",
     requestedVersion: policy.version,
-    resolvedVersion: policy.version
+    resolvedVersion: policy.version,
+    provider,
+    ownership: "external"
   };
 }
 
@@ -843,7 +1093,9 @@ async function resolveSystemCompiler(
       sourceKind: "msvc-detected",
       requestedVersion: policy.version,
       resolvedVersion: msvc.version ?? policy.version,
-      compilerFamily: "msvc"
+      compilerFamily: "msvc",
+      provider: "msvc",
+      ownership: "external"
     };
   }
 
@@ -861,7 +1113,12 @@ async function resolveSystemCompiler(
     sourceKind: "system-detected",
     requestedVersion: policy.version,
     resolvedVersion: policy.version,
-    compilerFamily: inferCompilerFamily(executable)
+    compilerFamily: inferCompilerFamily(executable),
+    provider:
+      hostAdapter.platform === "darwin" && isPathManagedByHomebrew(executable)
+        ? "homebrew"
+        : "system",
+    ownership: "external"
   };
 }
 
@@ -952,7 +1209,9 @@ async function installArchiveToolFromSource(
         resolvedVersion: existingRecord?.resolvedVersion ?? existingRecord?.version ?? source.version,
         compilerFamily: existingRecord?.compilerFamily ?? source.compilerFamily,
         catalogId: existingRecord?.catalogId ?? source.catalogId,
-        verifiedSha256: existingRecord?.verifiedSha256 ?? normalizedSha256
+        verifiedSha256: existingRecord?.verifiedSha256 ?? normalizedSha256,
+        provider: existingRecord?.provider ?? inferProviderFromSourceKind(existingRecord?.sourceKind ?? source.sourceKind),
+        ownership: existingRecord?.ownership ?? "cppx"
       };
       await registerTool(record);
       return record;
@@ -1038,7 +1297,9 @@ async function installArchiveToolFromSource(
     resolvedVersion: source.version,
     compilerFamily: source.compilerFamily,
     catalogId: source.catalogId,
-    verifiedSha256: normalizedSha256
+    verifiedSha256: normalizedSha256,
+    provider: inferProviderFromSourceKind(source.sourceKind),
+    ownership: "cppx"
   };
   await registerTool(record);
   logger.success("install-tools", `${tool} 설치됨: ${executable}`);
@@ -1072,6 +1333,11 @@ async function installCxxCompiler(
 ): Promise<ResolvedToolInfo> {
   if (policy.preferredFamily === "msvc") {
     throw new CppxError("MSVC는 system 모드로만 지원됩니다.");
+  }
+
+  if (hostAdapter.platform === "darwin") {
+    logger.info("install-tools", "Homebrew llvm 기반 C++ 컴파일러를 설치합니다.");
+    return installHomebrewManagedTool("cxx", policy, logger);
   }
 
   const source = await resolveLatestCxxSource(policy, logger);
@@ -1133,7 +1399,9 @@ async function installMsvcCompiler(
     requestedVersion: DEFAULT_TOOL_VERSION_TOKEN,
     resolvedVersion: version,
     compilerFamily: "msvc",
-    baseEnv
+    baseEnv,
+    provider: "msvc",
+    ownership: "external"
   };
   await registerTool(record);
   logger.success("install-tools", `cxx 설치됨: ${msvc.clPath} (MSVC)`);
@@ -1163,6 +1431,17 @@ async function installVcpkg(
       }
     }
   );
+}
+
+async function installConan(
+  policy: ToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
+  if (hostAdapter.platform === "darwin") {
+    return installHomebrewManagedTool("conan", policy, logger);
+  }
+
+  throw new CppxError("conan managed 설치는 현재 macOS Homebrew 경로만 지원됩니다.");
 }
 
 function formatInstallError(tool: ToolName, error: unknown): string {
@@ -1223,9 +1502,18 @@ export async function installAllTools(
   await ensureCppxLayout();
 
   const policies = resolveRequestedPolicies(toolPolicies);
+  const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
+    await Promise.all([
+      resolveToolLifecycleCapabilities("cmake"),
+      resolveToolLifecycleCapabilities("ninja"),
+      resolveToolLifecycleCapabilities("vcpkg"),
+      resolveToolLifecycleCapabilities("conan"),
+      resolveToolLifecycleCapabilities("cxx")
+    ]);
   let cmake: ResolvedToolInfo | undefined;
   let ninja: ResolvedToolInfo | undefined;
   let vcpkg: ResolvedToolInfo | undefined;
+  let conan: ResolvedToolInfo | undefined;
   let cxx: ResolvedToolInfo | undefined;
   const errors: string[] = [];
 
@@ -1237,7 +1525,11 @@ export async function installAllTools(
       }
       await registerTool(cmake);
     } else {
-      cmake = await installStaticArchiveTool("cmake", policies.cmake, logger);
+      ensureManagedLifecycleSupportedOrThrow("cmake", cmakeCapabilities);
+      cmake =
+        hostAdapter.platform === "darwin"
+          ? await installHomebrewManagedTool("cmake", policies.cmake, logger)
+          : await installStaticArchiveTool("cmake", policies.cmake, logger);
     }
   } catch (error) {
     errors.push(formatInstallError("cmake", error));
@@ -1251,7 +1543,11 @@ export async function installAllTools(
       }
       await registerTool(ninja);
     } else {
-      ninja = await installStaticArchiveTool("ninja", policies.ninja, logger);
+      ensureManagedLifecycleSupportedOrThrow("ninja", ninjaCapabilities);
+      ninja =
+        hostAdapter.platform === "darwin"
+          ? await installHomebrewManagedTool("ninja", policies.ninja, logger)
+          : await installStaticArchiveTool("ninja", policies.ninja, logger);
     }
   } catch (error) {
     errors.push(formatInstallError("ninja", error));
@@ -1266,10 +1562,28 @@ export async function installAllTools(
         }
         await registerTool(vcpkg);
       } else {
+        ensureManagedLifecycleSupportedOrThrow("vcpkg", vcpkgCapabilities);
         vcpkg = await installVcpkg(policies.vcpkg, logger);
       }
     } catch (error) {
       errors.push(formatInstallError("vcpkg", error));
+    }
+  }
+
+  if (dependencyBackend === "conan") {
+    try {
+      if (policies.conan.mode === "system") {
+        conan = await resolveSystemTool("conan", policies.conan) ?? undefined;
+        if (!conan) {
+          throw new CppxError("conan system 실행 파일을 찾지 못했습니다.");
+        }
+        await registerTool(conan);
+      } else {
+        ensureManagedLifecycleSupportedOrThrow("conan", conanCapabilities);
+        conan = await installConan(policies.conan, logger);
+      }
+    } catch (error) {
+      errors.push(formatInstallError("conan", error));
     }
   }
 
@@ -1287,6 +1601,7 @@ export async function installAllTools(
         await registerTool(cxx);
       }
     } else {
+      ensureManagedLifecycleSupportedOrThrow("cxx", cxxCapabilities);
       logger.info("install-tools", "llvm-mingw 기반 C++ 컴파일러를 설치합니다.");
       cxx = await installCxxCompiler(policies.cxx, logger);
     }
@@ -1294,7 +1609,7 @@ export async function installAllTools(
     errors.push(formatInstallError("cxx", error));
   }
 
-  if (!cmake || !ninja || (dependencyBackend === "vcpkg" && !vcpkg) || !cxx) {
+  if (!cmake || !ninja || (dependencyBackend === "vcpkg" && !vcpkg) || (dependencyBackend === "conan" && !conan) || !cxx) {
     const details =
       errors.length > 0
         ? errors.join(" | ")
@@ -1307,6 +1622,7 @@ export async function installAllTools(
       path.dirname(cmake.executable),
       path.dirname(ninja.executable),
       ...(vcpkg ? [path.dirname(vcpkg.executable)] : []),
+      ...(conan ? [path.dirname(conan.executable)] : []),
       path.dirname(cxx.executable)
     ])
   );
@@ -1336,23 +1652,32 @@ function buildResolvedExecutable(
     compilerFamily?: CompilerFamily;
     catalogId?: string;
     verifiedSha256?: string;
+    provider?: ToolLifecycleProvider;
+    ownership?: ToolOwnership;
   }
 ): ResolvedToolExecutable {
+  const sourceKind = record?.sourceKind ?? fallback.sourceKind;
+  const mode = record?.mode ?? fallback.mode;
   return {
     executable,
     root,
     record,
-    mode: record?.mode ?? fallback.mode,
-    sourceKind: record?.sourceKind ?? fallback.sourceKind,
+    mode,
+    sourceKind,
     requestedVersion: record?.requestedVersion ?? fallback.requestedVersion,
     resolvedVersion: record?.resolvedVersion ?? record?.version ?? fallback.resolvedVersion,
     compilerFamily: record?.compilerFamily ?? fallback.compilerFamily,
     catalogId: record?.catalogId ?? fallback.catalogId,
-    verifiedSha256: record?.verifiedSha256 ?? fallback.verifiedSha256
+    verifiedSha256: record?.verifiedSha256 ?? fallback.verifiedSha256,
+    provider: record?.provider ?? fallback.provider ?? inferProviderFromSourceKind(sourceKind),
+    ownership: inferOwnership(record, mode)
   };
 }
 
 function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
+  if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
+    return "homebrew-managed";
+  }
   if (tool === "cxx") {
     return "catalog-github-release";
   }
@@ -1377,7 +1702,29 @@ async function resolveManagedToolExecutable(
       sourceKind: getManagedFallbackSourceKind(tool),
       requestedVersion: policy?.version,
       resolvedVersion: record.version
-    });
+      });
+  }
+
+  if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
+    const brewExecutable = await resolveHomebrewExecutable();
+    if (brewExecutable) {
+      const homebrew = await resolveHomebrewFormulaExecutable(brewExecutable, tool);
+      if (homebrew) {
+        const ownership =
+          record?.provider === "homebrew" && (record.ownership ?? "unknown") === "cppx"
+            ? "cppx"
+            : "external";
+        return buildResolvedExecutable(homebrew.executable, homebrew.root, record, {
+          mode: "managed",
+          sourceKind: "homebrew-managed",
+          requestedVersion: policy?.version,
+          resolvedVersion: homebrew.version,
+          compilerFamily: homebrew.compilerFamily,
+          provider: "homebrew",
+          ownership
+        });
+      }
+    }
   }
 
   const toolRoot = getToolRoot(tool);
@@ -1476,10 +1823,11 @@ async function resolveToolExecutable(
 }
 
 function toStatusDetail(
-  resolved: ResolvedToolExecutable | null
+  resolved: ResolvedToolExecutable | null,
+  capabilities: ToolLifecycleCapabilities
 ): NonNullable<ToolStatus["details"]>[ToolName] {
   if (!resolved) {
-    return { ready: false };
+    return { ready: false, capabilities };
   }
 
   return {
@@ -1489,7 +1837,10 @@ function toStatusDetail(
     requestedVersion: resolved.requestedVersion,
     resolvedVersion: resolved.resolvedVersion,
     executable: resolved.executable,
-    verifiedSha256: resolved.verifiedSha256
+    verifiedSha256: resolved.verifiedSha256,
+    provider: resolved.provider,
+    ownership: resolved.ownership,
+    capabilities
   };
 }
 
@@ -1500,6 +1851,7 @@ function toResolutionDetail(
     requestedVersion?: string;
     compilerFamily?: CompilerFamily;
     verifiedSha256?: string;
+    capabilities?: ToolLifecycleCapabilities;
   }
 ): ToolResolutionDetail {
   if (!resolved) {
@@ -1508,7 +1860,8 @@ function toResolutionDetail(
       mode: fallback?.mode,
       requestedVersion: fallback?.requestedVersion,
       compilerFamily: fallback?.compilerFamily,
-      verifiedSha256: fallback?.verifiedSha256
+      verifiedSha256: fallback?.verifiedSha256,
+      capabilities: fallback?.capabilities
     };
   }
 
@@ -1521,7 +1874,10 @@ function toResolutionDetail(
     executable: resolved.executable,
     compilerFamily: resolved.compilerFamily,
     catalogId: resolved.catalogId,
-    verifiedSha256: resolved.verifiedSha256
+    verifiedSha256: resolved.verifiedSha256,
+    provider: resolved.provider,
+    ownership: resolved.ownership,
+    capabilities: fallback?.capabilities
   };
 }
 
@@ -1533,11 +1889,23 @@ export async function getResolvedToolSnapshot(
   const manifest = await readToolManifest();
   const policies = resolveRequestedPolicies(toolPolicies);
 
-  const [cmake, ninja, vcpkg, cxx] = await Promise.all([
+  const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
+    await Promise.all([
+      resolveToolLifecycleCapabilities("cmake"),
+      resolveToolLifecycleCapabilities("ninja"),
+      resolveToolLifecycleCapabilities("vcpkg"),
+      resolveToolLifecycleCapabilities("conan"),
+      resolveToolLifecycleCapabilities("cxx")
+    ]);
+
+  const [cmake, ninja, vcpkg, conan, cxx] = await Promise.all([
     resolveToolExecutable("cmake", manifest, policies.cmake),
     resolveToolExecutable("ninja", manifest, policies.ninja),
     dependencyBackend === "vcpkg"
       ? resolveToolExecutable("vcpkg", manifest, policies.vcpkg)
+      : Promise.resolve(null),
+    dependencyBackend === "conan"
+      ? resolveToolExecutable("conan", manifest, policies.conan)
       : Promise.resolve(null),
     resolveToolExecutable("cxx", manifest, policies.cxx)
   ]);
@@ -1545,20 +1913,29 @@ export async function getResolvedToolSnapshot(
   return {
     cmake: toResolutionDetail(cmake, {
       mode: policies.cmake.mode,
-      requestedVersion: policies.cmake.version
+      requestedVersion: policies.cmake.version,
+      capabilities: cmakeCapabilities
     }),
     ninja: toResolutionDetail(ninja, {
       mode: policies.ninja.mode,
-      requestedVersion: policies.ninja.version
+      requestedVersion: policies.ninja.version,
+      capabilities: ninjaCapabilities
     }),
     vcpkg: toResolutionDetail(vcpkg, {
       mode: policies.vcpkg.mode,
-      requestedVersion: policies.vcpkg.version
+      requestedVersion: policies.vcpkg.version,
+      capabilities: vcpkgCapabilities
+    }),
+    conan: toResolutionDetail(conan, {
+      mode: policies.conan.mode,
+      requestedVersion: policies.conan.version,
+      capabilities: conanCapabilities
     }),
     cxx: toResolutionDetail(cxx, {
       mode: policies.cxx.mode,
       requestedVersion: policies.cxx.version,
-      compilerFamily: policies.cxx.preferredFamily
+      compilerFamily: policies.cxx.preferredFamily,
+      capabilities: cxxCapabilities
     })
   };
 }
@@ -1567,10 +1944,20 @@ export async function getToolStatus(): Promise<ToolStatus> {
   await ensureCppxLayout();
   const manifest = await readToolManifest();
 
-  const [cmake, ninja, vcpkg, cxx] = await Promise.all([
+  const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
+    await Promise.all([
+      resolveToolLifecycleCapabilities("cmake"),
+      resolveToolLifecycleCapabilities("ninja"),
+      resolveToolLifecycleCapabilities("vcpkg"),
+      resolveToolLifecycleCapabilities("conan"),
+      resolveToolLifecycleCapabilities("cxx")
+    ]);
+
+  const [cmake, ninja, vcpkg, conan, cxx] = await Promise.all([
     resolveToolExecutable("cmake", manifest),
     resolveToolExecutable("ninja", manifest),
     resolveToolExecutable("vcpkg", manifest),
+    resolveToolExecutable("conan", manifest),
     resolveToolExecutable("cxx", manifest)
   ]);
 
@@ -1578,12 +1965,14 @@ export async function getToolStatus(): Promise<ToolStatus> {
     cmake: Boolean(cmake),
     ninja: Boolean(ninja),
     vcpkg: Boolean(vcpkg),
+    conan: Boolean(conan),
     cxx: Boolean(cxx),
     details: {
-      cmake: toStatusDetail(cmake),
-      ninja: toStatusDetail(ninja),
-      vcpkg: toStatusDetail(vcpkg),
-      cxx: toStatusDetail(cxx)
+      cmake: toStatusDetail(cmake, cmakeCapabilities),
+      ninja: toStatusDetail(ninja, ninjaCapabilities),
+      vcpkg: toStatusDetail(vcpkg, vcpkgCapabilities),
+      conan: toStatusDetail(conan, conanCapabilities),
+      cxx: toStatusDetail(cxx, cxxCapabilities)
     }
   };
 }
@@ -1597,11 +1986,14 @@ export async function resolveToolchainOrThrow(
   const manifest = await readToolManifest();
   const policies = resolveRequestedPolicies(toolPolicies);
 
-  const [cmake, ninja, vcpkg, cxxResolved] = await Promise.all([
+  const [cmake, ninja, vcpkg, conan, cxxResolved] = await Promise.all([
     resolveToolExecutable("cmake", manifest, policies.cmake),
     resolveToolExecutable("ninja", manifest, policies.ninja),
     dependencyBackend === "vcpkg"
       ? resolveToolExecutable("vcpkg", manifest, policies.vcpkg)
+      : Promise.resolve(null),
+    dependencyBackend === "conan"
+      ? resolveToolExecutable("conan", manifest, policies.conan)
       : Promise.resolve(null),
     resolveToolExecutable("cxx", manifest, policies.cxx)
   ]);
@@ -1610,6 +2002,7 @@ export async function resolveToolchainOrThrow(
   if (!cmake) missing.push("cmake");
   if (!ninja) missing.push("ninja");
   if (dependencyBackend === "vcpkg" && !vcpkg) missing.push("vcpkg");
+  if (dependencyBackend === "conan" && !conan) missing.push("conan");
   if (!cxxResolved) missing.push("cxx-compiler");
 
   if (missing.length > 0) {
@@ -1618,7 +2011,13 @@ export async function resolveToolchainOrThrow(
     );
   }
 
-  if (!cmake || !ninja || !cxxResolved || (dependencyBackend === "vcpkg" && !vcpkg)) {
+  if (
+    !cmake ||
+    !ninja ||
+    !cxxResolved ||
+    (dependencyBackend === "vcpkg" && !vcpkg) ||
+    (dependencyBackend === "conan" && !conan)
+  ) {
     throw new CppxError("도구 확인 중 예기치 않은 오류가 발생했습니다.");
   }
 
@@ -1660,6 +2059,7 @@ export async function resolveToolchainOrThrow(
       path.dirname(cmake.executable),
       path.dirname(ninja.executable),
       ...(vcpkg ? [path.dirname(vcpkg.executable)] : []),
+      ...(conan ? [path.dirname(conan.executable)] : []),
       path.dirname(cxx)
     ])
   );

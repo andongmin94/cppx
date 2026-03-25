@@ -2,18 +2,21 @@ import type {
   CompilerPreference,
   CppxAction,
   DependencyBackend,
+  ToolLifecycleProvider,
+  ToolOwnership,
   PresetConfigPayload,
   ProjectConfigPayload,
   ToolInstallMode
 } from "@shared/contracts";
 import type { HostPlatform } from "./platform";
 
-export type ToolName = "cmake" | "ninja" | "vcpkg" | "cxx";
+export type ToolName = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 export type CompilerFamily = "mingw" | "msvc";
 export type ToolSourceKind =
   | "catalog-archive"
   | "catalog-git"
   | "catalog-github-release"
+  | "homebrew-managed"
   | "system-detected"
   | "msvc-detected";
 
@@ -40,6 +43,7 @@ export interface NormalizedProjectConfig extends ProjectConfigPayload {
     cmake: ToolPolicy;
     ninja: ToolPolicy;
     vcpkg: ToolPolicy;
+    conan: ToolPolicy;
     cxx: CompilerToolPolicy;
   };
   presets: PresetConfigPayload[];
@@ -49,7 +53,7 @@ export interface ToolCatalogEntry {
   id: string;
   tool: ToolName;
   platform: HostPlatform;
-  arch: "x64";
+  arch: "x64" | "arm64";
   sourceKind: ToolSourceKind;
   executable: string;
   version?: string;
@@ -76,6 +80,8 @@ export interface ToolRecord {
   compilerFamily?: CompilerFamily;
   catalogId?: string;
   verifiedSha256?: string;
+  provider?: ToolLifecycleProvider;
+  ownership?: ToolOwnership;
 }
 
 export interface ToolManifest {

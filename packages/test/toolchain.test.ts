@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { getToolStatus, resolveToolchainOrThrow } from "../src/main/cppx/installers";
+import {
+  getToolStatus,
+  installAllTools,
+  resolveToolchainOrThrow
+} from "../src/main/cppx/installers";
 import { CppxError } from "../src/main/cppx/errors";
 import { getHostAdapter } from "../src/main/cppx/platform";
 import { getToolRoot, upsertToolRecord } from "../src/main/cppx/paths";
@@ -80,6 +84,11 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
       assert.equal(status.details?.cmake?.mode, "managed");
       assert.equal(status.details?.vcpkg?.sourceKind, "catalog-archive");
       assert.equal(status.details?.cmake?.executable, cmake);
+      assert.equal(status.details?.cmake?.provider, "archive");
+      assert.equal(status.details?.cmake?.ownership, "cppx");
+      assert.equal(status.details?.cmake?.capabilities?.install, true);
+      assert.equal(status.details?.cxx?.provider, "archive");
+      assert.equal(status.details?.cxx?.ownership, "cppx");
 
       const { logger } = createLogger();
       const toolchain = await resolveToolchainOrThrow(logger);
@@ -97,6 +106,41 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
     });
   } finally {
     await removeDir(localAppData);
+  }
+});
+
+test("installAllTools fails clearly when managed lifecycle is not supported on the current host", async () => {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const hostRoot = await createTempDir("unsupported-managed");
+  const { logger } = createLogger();
+
+  try {
+    await withHostDataRoot(hostRoot, async () => {
+      await assert.rejects(
+        () =>
+          installAllTools(
+            logger,
+            {
+              cmake: { mode: "managed", version: "default" },
+              ninja: { mode: "managed", version: "default" },
+              vcpkg: { mode: "managed", version: "default" },
+              cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+            },
+            "none"
+          ),
+        (error) => {
+          assert.ok(error instanceof CppxError);
+          assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
+          assert.match(error.details ?? "", /managed 수명주기/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await removeDir(hostRoot);
   }
 });
 

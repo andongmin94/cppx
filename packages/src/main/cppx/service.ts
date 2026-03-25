@@ -9,6 +9,10 @@ import type {
   ToolStatus
 } from "@shared/contracts";
 import { CppxError } from "./errors";
+import {
+  resolveHostSupport,
+  resolveToolLifecycleCapabilities
+} from "./host-support";
 import { getToolStatus, installAllTools, resolveToolchainOrThrow } from "./installers";
 import { CppxLogger, type LogSink } from "./logger";
 import { getHostAdapter } from "./platform";
@@ -48,6 +52,7 @@ export class CppxService {
       cmake: { ...base?.cmake, ...next?.cmake },
       ninja: { ...base?.ninja, ...next?.ninja },
       vcpkg: { ...base?.vcpkg, ...next?.vcpkg },
+      conan: { ...base?.conan, ...next?.conan },
       cxx: { ...base?.cxx, ...next?.cxx }
     };
   }
@@ -279,6 +284,14 @@ export class CppxService {
 
   async getHostDefaults(): Promise<HostDefaultsPayload> {
     const config = defaultProjectConfig("cppx-app", hostAdapter.compilerFamily);
+    const [hostSupport, cmake, ninja, vcpkg, conan, cxx] = await Promise.all([
+      resolveHostSupport(),
+      resolveToolLifecycleCapabilities("cmake"),
+      resolveToolLifecycleCapabilities("ninja"),
+      resolveToolLifecycleCapabilities("vcpkg"),
+      resolveToolLifecycleCapabilities("conan"),
+      resolveToolLifecycleCapabilities("cxx")
+    ]);
 
     return {
       platform: hostAdapter.platform,
@@ -288,7 +301,16 @@ export class CppxService {
         cmake: { ...config.tools.cmake },
         ninja: { ...config.tools.ninja },
         vcpkg: { ...config.tools.vcpkg },
+        conan: { ...config.tools.conan },
         cxx: { ...config.tools.cxx }
+      },
+      hostSupport,
+      toolCapabilities: {
+        cmake,
+        ninja,
+        vcpkg,
+        conan,
+        cxx
       }
     };
   }

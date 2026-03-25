@@ -15,7 +15,7 @@ CMake 설정을 직접 작성하고, 빌드 스크립트를 만들고, 패키지
 ## 주요 기능
 
 - **Cargo 스타일 CLI** — `init`, `add`, `build`, `run`, `test`, `pack` 명령어로 프로젝트를 빠르게 관리합니다
-- **호스트별 도구 정책** — Windows에서는 관리형 CMake/Ninja/vcpkg/컴파일러 설치를 지원하고, macOS/Linux에서는 시스템 도구 기반 네이티브 워크플로를 지원합니다
+- **호스트별 도구 정책** — Windows는 archive 기반 managed 경로를, macOS는 Homebrew + archive 기반 managed 경로를, Linux는 현재 system 중심 경로를 제공합니다
 - **다운로드 무결성 검증** — 관리형 아카이브 도구는 SHA-256을 확인한 뒤에만 압축을 풉니다
 - **단일 설정 원본** — `.cppx/config.toml` 하나만 관리하면 tool-owned 생성물은 `build/.cppx/` 아래에 다시 생성됩니다
 - **Electron GUI** — 프로젝트 탐색, backend/tool policy/preset 편집, 빌드, 실시간 로그 확인까지 마우스 클릭으로 수행할 수 있습니다
@@ -23,9 +23,26 @@ CMake 설정을 직접 작성하고, 빌드 스크립트를 만들고, 패키지
 
 ## 호스트 지원
 
-- **Windows** — 기본 backend는 `vcpkg`이고, CMake/Ninja/vcpkg와 MinGW 컴파일러를 관리형으로 설치할 수 있습니다. MSVC는 system 모드로 감지합니다
-- **macOS / Linux** — 기본 backend는 `none`이고, `cmake`, `ninja`, 시스템 C++ 컴파일러를 그대로 사용하는 네이티브 호스트 워크플로를 지원합니다
-- **공통 제한** — Conan은 별도 설치가 필요하고, macOS/Linux용 관리형 도구 catalog는 아직 제공하지 않습니다
+- **Windows** — 현재 가장 성숙한 경로입니다. 기본 backend는 `vcpkg`이고, CMake/Ninja/vcpkg와 MinGW 컴파일러를 관리형으로 설치할 수 있습니다. MSVC는 system 모드로 감지합니다
+- **macOS** — 기본 backend는 `none`이고, 공식 지원 대상은 macOS 14+입니다. Homebrew로 `cmake`, `ninja`, `conan`, `llvm`을 managed 설치할 수 있고, `vcpkg`는 검증된 archive + bootstrap 경로를 사용합니다
+- **Linux** — 기본 backend는 `none`이고, 현재 릴리스에서는 system 도구 기반 네이티브 host 워크플로가 기본입니다. managed Linux 경로는 Ubuntu 24.04 + `apt`를 기준으로 좁혀서 추가할 예정입니다
+- **공통 제한** — Linux managed host parity는 아직 구현 전입니다. Windows와 macOS는 현재 managed host-tool 경로가 있고, Linux는 다음 마일스톤 범위입니다
+
+### 현재 지원 매트릭스
+
+| 호스트 | 현재 지원 수준 | 기본 provider | install/update/remove |
+|---|---|---|---|
+| Windows x64 | official | `archive` | 지원 |
+| macOS 14+ | official | `homebrew` + `archive` | 지원 |
+| Linux | best-effort | `system` | 아직 미지원 |
+
+`status`와 `doctor`는 이제 각 도구에 대해 다음 정보를 함께 보여 줍니다.
+
+- 현재 준비 상태 (`ready` / `missing`)
+- 현재 사용 중인 방식 (`managed` / `system`)
+- 현재 provenance (`archive`, `homebrew`, `system`, `msvc` 등)
+- 소유권 (`cppx-owned` / `external`)
+- 현재 host에서 가능한 lifecycle (`detect`, `install`, `repair`, `remove`)
 
 ## 빠른 시작
 
@@ -42,7 +59,7 @@ npm run dev          # GUI 실행
 ```bash
 npm run cppx -- install-tools --compiler mingw  # Windows 관리형 도구 설치
 npm run cppx -- install-tools --compiler msvc   # Windows에서 MSVC 정책 사용
-npm run cppx -- install-tools                   # macOS/Linux에서는 시스템 도구 상태 확인
+npm run cppx -- install-tools                   # macOS에서는 Homebrew/archive 기반 managed 설치, Linux에서는 system 도구 확인
 npm run cppx -- init ./myapp --name myapp --backend none   # backend를 명시해 프로젝트 생성
 npm run cppx -- doctor ./myapp                  # 막히는 지점과 다음 단계 진단
 npm run cppx -- run ./myapp                     # 빌드 & 실행
@@ -70,8 +87,8 @@ npm run cppx -- run ./myapp                     # 빌드 & 실행
 | `run <경로>` | 빌드 후 바이너리를 실행합니다 (cargo run 스타일) |
 | `test <경로>` | CTest를 실행합니다 |
 | `pack <경로>` | CPack으로 배포 패키지를 생성합니다 |
-| `status` | 도구 설치 상태와 해석된 메타데이터를 확인합니다 |
-| `doctor [경로]` | blocking issue, warning, 다음 단계 안내를 한 번에 보여 줍니다 |
+| `status` | 도구 설치 상태, provenance, ownership, lifecycle capability를 확인합니다 |
+| `doctor [경로]` | host 지원 수준, blocking issue, warning, 다음 단계 안내를 한 번에 보여 줍니다 |
 
 ## config.toml 예시
 
@@ -147,9 +164,9 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기` / `config 저장` 
 
 현재는 `schema_version`, `target_name`, `package`, `compiler`, `tools`, `presets`, `dependency_backend`가 실제 생성기와 연결됩니다. `[[presets]]`는 configure/build/test/pack 프리셋과 VSCode 생성물에 반영되고, `dependency_backend`는 `vcpkg`, `conan`, `none`을 지원합니다.
 
-새 프로젝트의 기본값은 호스트에 따라 달라집니다. Windows는 `dependency_backend = "vcpkg"`와 관리형 도구 정책을 기본으로 사용하고, macOS/Linux는 `dependency_backend = "none"`과 system 도구 정책을 기본으로 사용합니다.
+새 프로젝트의 기본값은 호스트에 따라 달라집니다. Windows는 `dependency_backend = "vcpkg"`와 관리형 도구 정책을 기본으로 사용하고, macOS/Linux는 `dependency_backend = "none"`을 기본으로 사용합니다. 다만 macOS는 `[tools.*]` 기본값이 Homebrew/archive 기반 managed 정책이고, Linux는 system 정책이 기본입니다.
 
-`dependency_backend = "conan"`을 사용할 때는 `conan` 명령을 시스템에 별도로 설치해야 합니다. `install-tools`는 현재 Conan 자체를 설치하지 않습니다.
+`dependency_backend = "conan"`을 사용할 때 macOS는 `install-tools`가 Homebrew `conan` formula를 준비할 수 있습니다. Windows/Linux는 현재 `conan` 명령을 system PATH에서 감지하는 경로가 기본입니다.
 
 `init`은 `--backend <vcpkg|conan|none>`를 지원하므로 처음부터 의존성 방식을 명시할 수 있습니다.
 `install-tools`는 `--compiler <mingw|msvc>`와 `--msvc-installation-path <path>`를 지원합니다.
@@ -191,7 +208,7 @@ cppx/
 
 Electron이 Node 모드(`ELECTRON_RUN_AS_NODE=1`)로 시작되면 `No electron app entry file found` 또는 `app.whenReady is undefined` 같은 오류가 발생할 수 있습니다. 이 프로젝트의 `dev`, `preview` 스크립트는 해당 환경변수를 자동으로 해제하므로 정상 실행됩니다.
 
-macOS/Linux에서 `cmake`, `ninja`, `clang++` 또는 `g++`가 PATH에 없다면 `build`, `run`, `test`, `pack`, `smoke:native`가 실패합니다. 이 경우 시스템 패키지 매니저로 먼저 설치해야 합니다.
+macOS에서는 Homebrew가 준비되어 있으면 `install-tools`로 managed host 도구를 부트스트랩할 수 있습니다. Linux는 아직 `cmake`, `ninja`, `clang++` 또는 `g++`가 PATH에 보여야 `build`, `run`, `test`, `pack`, `smoke:native`가 성공합니다.
 
 프로젝트 상태가 애매하거나 `add`가 왜 막히는지 모르겠다면 `npm run cppx -- doctor <workspace>`를 먼저 실행하는 편이 가장 빠릅니다.
 

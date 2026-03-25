@@ -76,6 +76,7 @@ test("doctor exits 1 and reports blockers when required tools are missing", asyn
     const stdout = asText(result.stdout);
     const stderr = asText(result.stderr);
     assert.equal(result.status, 1, stderr || stdout);
+    assert.match(stdout, /\[(OK|WARN)\] host:/);
     assert.match(stdout, /\[BLOCKER\] cmake:/);
     assert.match(stdout, /summary: blockers=/);
     assert.match(stdout, /dependency_backend = "none"이라서 cppx add를 사용할 수 없습니다/);
@@ -124,6 +125,7 @@ test("doctor exits 0 with actionable warnings when system tools are available", 
     const stdout = asText(result.stdout);
     const stderr = asText(result.stderr);
     assert.equal(result.status, 0, stderr || stdout);
+    assert.match(stdout, /\[(OK|WARN)\] host:/);
     assert.match(stdout, /\[OK\] cmake:/);
     assert.match(stdout, /\[OK\] ninja:/);
     assert.match(stdout, /\[OK\] cxx:/);

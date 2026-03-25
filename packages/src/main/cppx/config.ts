@@ -319,6 +319,7 @@ function mergeToolPolicies(
     cmake: { ...current?.cmake, ...next?.cmake },
     ninja: { ...current?.ninja, ...next?.ninja },
     vcpkg: { ...current?.vcpkg, ...next?.vcpkg },
+    conan: { ...current?.conan, ...next?.conan },
     cxx: { ...current?.cxx, ...next?.cxx }
   };
 }
@@ -389,6 +390,7 @@ export function defaultProjectConfig(
       cmake: defaultToolPolicy("cmake"),
       ninja: defaultToolPolicy("ninja"),
       vcpkg: defaultToolPolicy("vcpkg"),
+      conan: defaultToolPolicy("conan"),
       cxx: defaultCompilerPolicy(compilerFamily)
     },
     presets: createDefaultPresets(targetTriplet)
@@ -480,6 +482,7 @@ export function normalizeProjectConfig(
       cmake: normalizeToolPolicy(raw.tools?.cmake, seed.tools.cmake),
       ninja: normalizeToolPolicy(raw.tools?.ninja, seed.tools.ninja),
       vcpkg: normalizeToolPolicy(raw.tools?.vcpkg, seed.tools.vcpkg),
+      conan: normalizeToolPolicy(raw.tools?.conan, seed.tools.conan),
       cxx: normalizeCompilerPolicy(raw.tools?.cxx, seed.tools.cxx, compiler)
     },
     presets
@@ -882,6 +885,8 @@ export function configToToml(config: NormalizedProjectConfig): string {
     formatToolPolicySection("ninja", config.tools.ninja),
     "",
     formatToolPolicySection("vcpkg", config.tools.vcpkg),
+    "",
+    formatToolPolicySection("conan", config.tools.conan),
     "",
     formatToolPolicySection("cxx", config.tools.cxx)
   );

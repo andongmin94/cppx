@@ -10,6 +10,11 @@ import type {
   ToolStatusDetail
 } from "@shared/contracts";
 import { formatCompilerPreference } from "@shared/compiler-display";
+import {
+  formatHostSupportSummary,
+  formatLifecycleSummary,
+  getToolOwnershipLabel
+} from "@shared/tooling-display";
 import { CPPX_CONFIG_PATH, parseConfigToml } from "./cppx/config";
 import { runDoctor } from "./cppx/doctor";
 import { pathExists } from "./cppx/fs-utils";
@@ -127,6 +132,7 @@ function printStatusGuidance(
 
 function printDoctorReport(report: Awaited<ReturnType<typeof runDoctor>>): void {
   console.log(`host: ${report.host.platform}/${report.host.arch}`);
+  console.log(`support: ${formatHostSupportSummary(report.support)}`);
   console.log(`default backend: ${report.host.defaultBackend}`);
   console.log(`active backend: ${report.activeBackend}`);
   console.log(
@@ -166,7 +172,7 @@ program
 program
   .command("install-tools")
   .description(
-    "Resolve or install CMake, Ninja, vcpkg, and C++ compiler according to host policy"
+    "Resolve or install host tools such as CMake, Ninja, vcpkg, conan, and C++ compiler"
   )
   .option("--compiler <compiler>", "Compiler family (Windows only: mingw or msvc)")
   .option("--msvc-installation-path <path>", "Preferred MSVC installation path")
@@ -280,14 +286,18 @@ program
       ["cmake", status.cmake, status.details?.cmake],
       ["ninja", status.ninja, status.details?.ninja],
       ["vcpkg", status.vcpkg, status.details?.vcpkg],
+      ["conan", status.conan, status.details?.conan],
       ["cxx", status.cxx, status.details?.cxx]
     ];
 
     for (const [name, ready, detail] of rows) {
       const detailParts = [
         detail?.mode,
+        detail?.provider,
+        detail?.ownership ? getToolOwnershipLabel(detail.ownership) : undefined,
         detail?.resolvedVersion,
         detail?.sourceKind,
+        detail?.capabilities ? formatLifecycleSummary(detail.capabilities) : undefined,
         detail?.verifiedSha256 ? `sha256:${detail.verifiedSha256.slice(0, 12)}` : undefined,
         detail?.executable
       ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);

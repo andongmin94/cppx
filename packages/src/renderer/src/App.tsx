@@ -6,12 +6,15 @@ import type {
   CppxApi,
   DependencyBackend,
   HostDefaultsPayload,
+  HostPlatformPayload,
+  HostSupportPayload,
   LogEntry,
   PresetConfigPayload,
   ProjectConfigPayload,
   ProjectToolPoliciesPayload,
   RunCommandPayload,
   RunCommandResult,
+  ToolLifecycleCapabilities,
   ToolInstallMode,
   ToolStatusDetail,
   ToolStatus
@@ -20,6 +23,11 @@ import {
   getCompilerPreferenceLabel,
   getCompilerPreferenceOptions
 } from "@shared/compiler-display";
+import {
+  formatHostSupportSummary,
+  formatLifecycleSummary,
+  getToolOwnershipLabel
+} from "@shared/tooling-display";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -60,11 +68,12 @@ const initialToolStatus: ToolStatus = {
   cmake: false,
   ninja: false,
   vcpkg: false,
+  conan: false,
   cxx: false
 };
 
 type ViewId = "workspace" | "build" | "logs";
-type InstallToolKey = "cmake" | "ninja" | "vcpkg" | "cxx";
+type InstallToolKey = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 type InstallProgressStatus = "idle" | "running" | "success" | "error";
 type InitButtonStatus = "idle" | "running" | "success" | "error";
 type InstallButtonStatus = "idle" | "running" | "success" | "error";
@@ -73,7 +82,7 @@ type CompilerChoiceDecision =
   | { kind: "msvc"; installationPath: string }
   | { kind: "mingw" }
   | { kind: "close" };
-type EditableToolId = "cmake" | "ninja" | "vcpkg" | "cxx";
+type EditableToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 
 interface StatusToastState {
   message: string;
@@ -109,8 +118,8 @@ const viewItems: {
   { id: "logs", label: "로그", icon: Terminal }
 ];
 
-const INSTALL_TOOL_ORDER: InstallToolKey[] = ["cmake", "ninja", "vcpkg", "cxx"];
-const EDITABLE_TOOL_IDS: EditableToolId[] = ["cmake", "ninja", "vcpkg", "cxx"];
+const INSTALL_TOOL_ORDER: InstallToolKey[] = ["cmake", "ninja", "vcpkg", "conan", "cxx"];
+const EDITABLE_TOOL_IDS: EditableToolId[] = ["cmake", "ninja", "vcpkg", "conan", "cxx"];
 const EMPTY_BUILD_TYPE = "__none__";
 const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = [
   { value: "vcpkg", label: "vcpkg" },
@@ -125,6 +134,7 @@ const toolLabels: Record<EditableToolId, string> = {
   cmake: "CMake",
   ninja: "Ninja",
   vcpkg: "vcpkg",
+  conan: "conan",
   cxx: "C++"
 };
 
@@ -132,6 +142,7 @@ const INSTALL_TOOL_DONE_PATTERNS: Record<InstallToolKey, string[]> = {
   cmake: ["cmake 설치됨", "cmake 이미 설치됨"],
   ninja: ["ninja 설치됨", "ninja 이미 설치됨"],
   vcpkg: ["vcpkg 설치됨"],
+  conan: ["conan 설치됨", "conan 이미 설치됨"],
   cxx: ["cxx 설치됨", "cxx 이미 설치됨"]
 };
 
@@ -140,6 +151,7 @@ function createEmptyInstallCompleted(): Record<InstallToolKey, boolean> {
     cmake: false,
     ninja: false,
     vcpkg: false,
+    conan: false,
     cxx: false
   };
 }
@@ -149,6 +161,7 @@ function createEmptyInstallToolProgress(): Record<InstallToolKey, InstallToolPro
     cmake: { percent: 0, status: "idle" },
     ninja: { percent: 0, status: "idle" },
     vcpkg: { percent: 0, status: "idle" },
+    conan: { percent: 0, status: "idle" },
     cxx: { percent: 0, status: "idle" }
   };
 }
@@ -170,12 +183,13 @@ function installPercentFromCompleted(count: number): number {
 function findInstallStage(message: string): string | null {
   if (message.includes("'install-tools' 시작")) return "도구 설치를 시작합니다";
   if (message.includes("MSVC 컴파일러 사용을 시도합니다")) return "MSVC 컴파일러 감지 중";
+  if (message.includes("Homebrew llvm 기반 C++ 컴파일러를 설치합니다")) return "Homebrew LLVM 설치 준비 중";
   if (message.includes("llvm-mingw 기반 C++ 컴파일러를 설치합니다")) return "MinGW 컴파일러 설치 준비 중";
   if (message.includes("다운로드 중")) return "패키지 다운로드 중";
   if (message.includes("Expand-Archive")) return "압축 해제 중";
-  if (message.includes("git clone")) return "vcpkg 저장소 클론 중";
-  if (message.includes("git pull")) return "vcpkg 업데이트 중";
   if (message.includes("bootstrap-vcpkg.bat")) return "vcpkg 부트스트랩 중";
+  if (message.includes("bootstrap-vcpkg.sh")) return "vcpkg 부트스트랩 중";
+  if (message.includes("brew install")) return "Homebrew formula 설치 중";
   if (message.includes("llvm-mingw 컴파일러 패키지 조회 중")) return "C++ 컴파일러 릴리스 조회 중";
   if (message.includes("캐시된 아카이브 사용")) return "캐시된 설치 파일 사용 중";
   if (message.includes("이미 설치됨")) return "기존 설치 감지, 상태 갱신 중";
@@ -194,6 +208,7 @@ function cloneInstallToolProgress(
     cmake: { ...tools.cmake },
     ninja: { ...tools.ninja },
     vcpkg: { ...tools.vcpkg },
+    conan: { ...tools.conan },
     cxx: { ...tools.cxx }
   };
 }
@@ -233,8 +248,10 @@ function inferInstallToolFromMessage(message: string): InstallToolKey | null {
   if (lower.includes("cmake")) return "cmake";
   if (lower.includes("ninja")) return "ninja";
   if (lower.includes("vcpkg")) return "vcpkg";
+  if (lower.includes("conan")) return "conan";
   if (
     lower.includes("llvm-mingw") ||
+    lower.includes("brew install llvm") ||
     lower.includes("cxx") ||
     lower.includes("msvc") ||
     lower.includes("cl.exe")
@@ -292,14 +309,16 @@ function updateInstallProgressFromLog(
       markToolProgress(next, toolFromMessage, 78);
     }
   }
-  if (message.includes("git clone")) {
-    markToolProgress(next, "vcpkg", 36);
-  }
-  if (message.includes("git pull")) {
-    markToolProgress(next, "vcpkg", 42);
-  }
   if (message.includes("bootstrap-vcpkg.bat")) {
     markToolProgress(next, "vcpkg", 76);
+  }
+  if (message.includes("bootstrap-vcpkg.sh")) {
+    markToolProgress(next, "vcpkg", 76);
+  }
+  if (message.includes("brew install")) {
+    if (toolFromMessage) {
+      markToolProgress(next, toolFromMessage, 70);
+    }
   }
   if (message.includes("llvm-mingw 컴파일러 패키지 조회 중")) {
     markToolProgress(next, "cxx", 18);
@@ -391,12 +410,44 @@ function toErrorMessage(error: unknown): string {
 }
 
 function createDefaultToolPolicies(
-  compilerFamily: CompilerPreference = "mingw"
+  compilerFamily: CompilerPreference = "mingw",
+  platform: HostPlatformPayload = "win32"
 ): Required<ProjectToolPoliciesPayload> {
+  if (platform === "darwin") {
+    return {
+      cmake: { mode: "managed", version: "default" },
+      ninja: { mode: "managed", version: "default" },
+      vcpkg: { mode: "managed", version: "default" },
+      conan: { mode: "managed", version: "default" },
+      cxx: {
+        mode: "managed",
+        version: "latest",
+        preferredFamily: "mingw",
+        msvcInstallationPath: ""
+      }
+    };
+  }
+
+  if (platform !== "win32") {
+    return {
+      cmake: { mode: "system", version: "default" },
+      ninja: { mode: "system", version: "default" },
+      vcpkg: { mode: "system", version: "default" },
+      conan: { mode: "system", version: "default" },
+      cxx: {
+        mode: "system",
+        version: "default",
+        preferredFamily: "mingw",
+        msvcInstallationPath: ""
+      }
+    };
+  }
+
   return {
     cmake: { mode: "managed", version: "default" },
     ninja: { mode: "managed", version: "default" },
     vcpkg: { mode: "managed", version: "default" },
+    conan: { mode: "system", version: "default" },
     cxx:
       compilerFamily === "msvc"
         ? {
@@ -414,6 +465,115 @@ function createDefaultToolPolicies(
   };
 }
 
+function detectRendererPlatform(): HostPlatformPayload {
+  const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent.toLowerCase();
+  if (userAgent.includes("windows")) {
+    return "win32";
+  }
+  if (userAgent.includes("mac os") || userAgent.includes("macintosh")) {
+    return "darwin";
+  }
+  return "linux";
+}
+
+function detectRendererArch(): string {
+  const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent.toLowerCase();
+  return userAgent.includes("arm64") || userAgent.includes("aarch64") ? "arm64" : "x64";
+}
+
+function createFallbackHostSupport(platform: HostPlatformPayload): HostSupportPayload {
+  const arch = detectRendererArch();
+
+  if (platform === "win32") {
+    return {
+      platform,
+      arch,
+      hostLabel: `Windows ${arch}`,
+      tier: "official",
+      managedLifecycleReady: true,
+      recommendedProvider: "archive",
+      notes: []
+    };
+  }
+
+  if (platform === "darwin") {
+    return {
+      platform,
+      arch,
+      hostLabel: `macOS ${arch}`,
+      tier: "official",
+      managedLifecycleReady: false,
+      recommendedProvider: "homebrew",
+      notes: ["Homebrew 준비 여부를 아직 확인하지 못했습니다. 서비스 연결 후 실제 capability가 갱신됩니다."]
+    };
+  }
+
+  return {
+    platform,
+    arch,
+    hostLabel: `Linux ${arch}`,
+    tier: "best-effort",
+    managedLifecycleReady: false,
+    recommendedProvider: "system",
+    notes: ["현재 릴리스에서는 system 도구 기반만 안전하게 사용할 수 있습니다."]
+  };
+}
+
+function createFallbackToolCapabilities(
+  platform: HostPlatformPayload
+): Record<"cmake" | "ninja" | "vcpkg" | "conan" | "cxx", ToolLifecycleCapabilities> {
+  if (platform === "win32") {
+    return {
+      cmake: { provider: "archive", detect: true, install: true, repair: true, remove: true },
+      ninja: { provider: "archive", detect: true, install: true, repair: true, remove: true },
+      vcpkg: { provider: "archive", detect: true, install: true, repair: true, remove: true },
+      conan: {
+        provider: "system",
+        detect: true,
+        install: false,
+        repair: false,
+        remove: false,
+        note: "Windows에서는 conan을 PATH에서 감지합니다."
+      },
+      cxx: {
+        provider: "archive",
+        detect: true,
+        install: true,
+        repair: true,
+        remove: true,
+        note: "Windows에서는 MinGW 관리형 설치를 우선 지원합니다."
+      }
+    };
+  }
+
+  if (platform === "darwin") {
+    return {
+      cmake: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
+      ninja: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
+      vcpkg: { provider: "archive", detect: true, install: true, repair: true, remove: true },
+      conan: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
+      cxx: {
+        provider: "homebrew",
+        detect: true,
+        install: false,
+        repair: false,
+        remove: false,
+        note: "macOS managed C++ 도구는 Homebrew llvm formula를 사용합니다."
+      }
+    };
+  }
+
+  const provider = "system";
+  const note = "현재 릴리스에서는 system 도구 기반만 안전하게 사용할 수 있습니다.";
+  return {
+    cmake: { provider, detect: true, install: false, repair: false, remove: false, note },
+    ninja: { provider, detect: true, install: false, repair: false, remove: false, note },
+    vcpkg: { provider, detect: true, install: false, repair: false, remove: false, note },
+    conan: { provider, detect: true, install: false, repair: false, remove: false, note },
+    cxx: { provider, detect: true, install: false, repair: false, remove: false, note }
+  };
+}
+
 function cloneToolPolicies(
   toolPolicies: Required<ProjectToolPoliciesPayload>
 ): Required<ProjectToolPoliciesPayload> {
@@ -421,16 +581,20 @@ function cloneToolPolicies(
     cmake: { ...toolPolicies.cmake },
     ninja: { ...toolPolicies.ninja },
     vcpkg: { ...toolPolicies.vcpkg },
+    conan: { ...toolPolicies.conan },
     cxx: { ...toolPolicies.cxx }
   };
 }
 
 function createFallbackHostDefaults(): HostDefaultsPayload {
+  const platform = detectRendererPlatform();
   return {
-    platform: "win32",
-    defaultPreset: "debug-x64",
-    dependencyBackend: "vcpkg",
-    toolPolicies: createDefaultToolPolicies()
+    platform,
+    defaultPreset: `debug-${detectRendererArch()}`,
+    dependencyBackend: platform === "win32" ? "vcpkg" : "none",
+    toolPolicies: createDefaultToolPolicies("mingw", platform),
+    hostSupport: createFallbackHostSupport(platform),
+    toolCapabilities: createFallbackToolCapabilities(platform)
   };
 }
 
@@ -439,7 +603,7 @@ function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPo
     config.tools?.cxx?.preferredFamily ??
     config.compiler?.preferredFamily ??
     "mingw";
-  const defaults = createDefaultToolPolicies(compilerFamily);
+  const defaults = createDefaultToolPolicies(compilerFamily, detectRendererPlatform());
 
   return {
     cmake: {
@@ -453,6 +617,10 @@ function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPo
     vcpkg: {
       mode: config.tools?.vcpkg?.mode ?? defaults.vcpkg.mode,
       version: config.tools?.vcpkg?.version ?? defaults.vcpkg.version
+    },
+    conan: {
+      mode: config.tools?.conan?.mode ?? defaults.conan.mode,
+      version: config.tools?.conan?.version ?? defaults.conan.version
     },
     cxx: {
       mode: config.tools?.cxx?.mode ?? defaults.cxx.mode,
@@ -480,6 +648,10 @@ const toToolPoliciesPayload = (
   vcpkg: {
     mode: toolPolicies.vcpkg.mode,
     version: toolPolicies.vcpkg.version
+  },
+  conan: {
+    mode: toolPolicies.conan.mode,
+    version: toolPolicies.conan.version
   },
   cxx: {
     mode: toolPolicies.cxx.mode,
@@ -511,17 +683,21 @@ function getDependencyDescription(backend: DependencyBackend): string {
 }
 
 function getToolStatusSummary(detail: ToolStatusDetail | undefined): string | null {
-  if (!detail?.ready) {
-    return null;
-  }
-
   const parts = [
-    detail.mode,
-    detail.resolvedVersion ?? detail.requestedVersion,
-    detail.sourceKind
+    detail?.ready ? detail.mode : undefined,
+    detail?.provider,
+    detail?.ownership ? getToolOwnershipLabel(detail.ownership) : undefined,
+    detail?.ready ? detail.resolvedVersion ?? detail.requestedVersion : undefined,
+    detail?.ready ? detail.sourceKind : undefined,
+    detail?.capabilities ? formatLifecycleSummary(detail.capabilities) : undefined
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function getToolCapabilityNote(detail: ToolStatusDetail | undefined): string | null {
+  const note = detail?.capabilities?.note?.trim();
+  return note && note.length > 0 ? note : null;
 }
 
 function getInitButtonText(status: InitButtonStatus): string {
@@ -776,9 +952,7 @@ export default function App() {
         .getHostDefaults()
         .catch(() => createFallbackHostDefaults());
       setHostDefaults({
-        platform: resolvedHostDefaults.platform,
-        defaultPreset: resolvedHostDefaults.defaultPreset,
-        dependencyBackend: resolvedHostDefaults.dependencyBackend,
+        ...resolvedHostDefaults,
         toolPolicies: cloneToolPolicies(resolvedHostDefaults.toolPolicies)
       });
       resetProjectEditor(resolvedHostDefaults);
@@ -1170,6 +1344,10 @@ export default function App() {
           mode: toolPolicies.vcpkg.mode,
           version: toolPolicies.vcpkg.version
         },
+        conan: {
+          mode: toolPolicies.conan.mode,
+          version: toolPolicies.conan.version
+        },
         cxx: {
           mode: toolPolicies.cxx.mode,
           version: toolPolicies.cxx.version,
@@ -1236,6 +1414,8 @@ export default function App() {
       }
 
       if (action === "install-tools") {
+        const installsVcpkg = dependencyBackend === "vcpkg";
+        const installsConan = dependencyBackend === "conan";
         setInstallProgress((prev) => ({
           ...prev,
           status: result.ok ? "success" : "error",
@@ -1245,7 +1425,8 @@ export default function App() {
             ? {
                 cmake: true,
                 ninja: true,
-                vcpkg: true,
+                vcpkg: installsVcpkg,
+                conan: installsConan,
                 cxx: true
               }
             : prev.completed,
@@ -1253,7 +1434,12 @@ export default function App() {
             ? {
                 cmake: { percent: 100, status: "success" },
                 ninja: { percent: 100, status: "success" },
-                vcpkg: { percent: 100, status: "success" },
+                vcpkg: installsVcpkg
+                  ? { percent: 100, status: "success" }
+                  : { percent: 0, status: "idle" },
+                conan: installsConan
+                  ? { percent: 100, status: "success" }
+                  : { percent: 0, status: "idle" },
                 cxx: { percent: 100, status: "success" }
               }
             : prev.tools
@@ -1973,6 +2159,14 @@ export default function App() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <div className="rounded-[10px] border border-border/70 bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                    <p>{formatHostSupportSummary(hostDefaults.hostSupport)}</p>
+                    {hostDefaults.hostSupport.notes.map((note, index) => (
+                      <p key={`${note}-${index}`} className="mt-1">
+                        {note}
+                      </p>
+                    ))}
+                  </div>
                   <div className="space-y-1.5">
                     <ToolStatusRow
                       name="CMake"
@@ -1993,6 +2187,13 @@ export default function App() {
                       ready={toolStatus.vcpkg}
                       detail={toolStatus.details?.vcpkg}
                       progress={installProgress.tools.vcpkg}
+                      showProgress={installProgress.status !== "idle"}
+                    />
+                    <ToolStatusRow
+                      name="conan"
+                      ready={toolStatus.conan}
+                      detail={toolStatus.details?.conan}
+                      progress={installProgress.tools.conan}
                       showProgress={installProgress.status !== "idle"}
                     />
                     <ToolStatusRow
@@ -2029,7 +2230,15 @@ export default function App() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    도구 누락 상태에서는 <code className="font-mono">install-tools</code>를 먼저 실행하는 것이 안전합니다.
+                    {hostDefaults.hostSupport.managedLifecycleReady ? (
+                      <>
+                        도구 누락 상태에서는 <code className="font-mono">install-tools</code>를 먼저 실행하는 것이 안전합니다.
+                      </>
+                    ) : (
+                      <>
+                        이 host에서는 일부 도구가 아직 system 설치를 먼저 필요로 합니다. 각 툴 행의 lifecycle 안내와 <code className="font-mono">doctor</code> 출력을 확인하세요.
+                      </>
+                    )}
                   </p>
                 </CardContent>
               </Card>
@@ -2213,6 +2422,7 @@ function ToolStatusRow({
     ? Math.max(0, Math.min(100, Math.trunc(progress.percent)))
     : 0;
   const summary = getToolStatusSummary(detail);
+  const capabilityNote = getToolCapabilityNote(detail);
 
   return (
     <div className="flex items-center gap-2 rounded-[10px] border border-border/70 bg-secondary/35 px-3 py-2">
@@ -2228,6 +2438,11 @@ function ToolStatusRow({
         {summary && (
           <p className="truncate pl-6 text-[11px] text-muted-foreground" title={summary}>
             {summary}
+          </p>
+        )}
+        {capabilityNote && (
+          <p className="pl-6 text-[11px] text-muted-foreground/90" title={capabilityNote}>
+            {capabilityNote}
           </p>
         )}
       </div>

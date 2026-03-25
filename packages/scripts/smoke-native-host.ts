@@ -43,15 +43,36 @@ function createInitToolchain(
   };
 }
 
+function getSmokeBackend(): "vcpkg" | "conan" | "none" {
+  const raw = (process.env.CPPX_SMOKE_BACKEND ?? "none").trim().toLowerCase();
+  return raw === "vcpkg" || raw === "conan" ? raw : "none";
+}
+
+function getSmokeToolMode(): "managed" | "system" {
+  return (process.env.CPPX_SMOKE_TOOL_MODE ?? "").trim().toLowerCase() === "managed"
+    ? "managed"
+    : "system";
+}
+
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
-  const dependencyBackend = "none" as const;
-  const toolPolicy = { mode: "system" as const, version: "latest" };
+  const dependencyBackend = getSmokeBackend();
+  const toolMode = getSmokeToolMode();
+  const toolPolicy = {
+    mode: toolMode,
+    version: toolMode === "managed" ? "default" : "latest"
+  } as const;
   const cxxPolicy =
     process.platform === "win32"
-      ? { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
-      : { mode: "system" as const, version: "latest", preferredFamily: "mingw" as const };
+      ? toolMode === "managed"
+        ? { mode: "managed" as const, version: "latest", preferredFamily: "mingw" as const }
+        : { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
+      : {
+          mode: toolMode,
+          version: toolMode === "managed" ? "latest" : "latest",
+          preferredFamily: "mingw" as const
+        };
 
   try {
     const toolchain = await resolveToolchainOrThrow(
@@ -60,6 +81,7 @@ async function main(): Promise<void> {
         cmake: toolPolicy,
         ninja: toolPolicy,
         vcpkg: toolPolicy,
+        conan: toolPolicy,
         cxx: cxxPolicy
       },
       dependencyBackend
@@ -76,6 +98,7 @@ async function main(): Promise<void> {
         cmake: toolPolicy,
         ninja: toolPolicy,
         vcpkg: toolPolicy,
+        conan: toolPolicy,
         cxx: cxxPolicy
       }
     });

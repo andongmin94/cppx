@@ -1,20 +1,26 @@
 import { CppxError } from "./errors";
-import { getHostAdapter } from "./platform";
+import { createHostAdapter } from "./platform";
 import type { CompilerFamily, ToolCatalogEntry, ToolName } from "./types";
 
 export const DEFAULT_TOOL_VERSION_TOKEN = "default";
 export const LATEST_TOOL_VERSION_TOKEN = "latest";
 
-const hostAdapter = getHostAdapter();
+function getHostArchLabel(): "x64" | "arm64" {
+  return process.arch === "arm64" ? "arm64" : "x64";
+}
 
-const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
+function getExecutableName(platform: ToolCatalogEntry["platform"], baseName: string): string {
+  return createHostAdapter(platform).getExecutableName(baseName);
+}
+
+const TOOL_CATALOG: ToolCatalogEntry[] = [
   {
     id: "cmake-3.30.5-windows-x64",
     tool: "cmake",
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-archive",
-    executable: hostAdapter.getExecutableName("cmake"),
+    executable: getExecutableName("win32", "cmake"),
     version: "3.30.5",
     sha256: "5ab6e1faf20256ee4f04886597e8b6c3b1bd1297b58a68a58511af013710004b",
     urls: [
@@ -28,7 +34,7 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-archive",
-    executable: hostAdapter.getExecutableName("ninja"),
+    executable: getExecutableName("win32", "ninja"),
     version: "1.12.1",
     sha256: "f550fec705b6d6ff58f2db3c374c2277a37691678d6aba463adcbb129108467a",
     urls: ["https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip"]
@@ -39,7 +45,7 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-archive",
-    executable: hostAdapter.getExecutableName("vcpkg"),
+    executable: getExecutableName("win32", "vcpkg"),
     version: "2026.03.18",
     sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
     urls: [
@@ -53,7 +59,7 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-archive",
-    executable: hostAdapter.getExecutableName("vcpkg"),
+    executable: getExecutableName("win32", "vcpkg"),
     version: "2026.02.27",
     sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
     urls: [
@@ -67,13 +73,69 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-github-release",
-    executable: hostAdapter.getExecutableName("clang++"),
+    executable: getExecutableName("win32", "clang++"),
     repoUrl: "https://api.github.com/repos/mstorsjo/llvm-mingw/releases?per_page=20",
     assetPatterns: [
       "^llvm-mingw-.*-ucrt-x86_64\\.zip$",
       "^llvm-mingw-.*-msvcrt-x86_64\\.zip$"
     ],
     compilerFamily: "mingw"
+  },
+  {
+    id: "vcpkg-2026.03.18-darwin-x64",
+    tool: "vcpkg",
+    platform: "darwin",
+    arch: "x64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("darwin", "vcpkg"),
+    version: "2026.03.18",
+    sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.03.18",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.03.18.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.03.18-darwin-arm64",
+    tool: "vcpkg",
+    platform: "darwin",
+    arch: "arm64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("darwin", "vcpkg"),
+    version: "2026.03.18",
+    sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.03.18",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.03.18.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.02.27-darwin-x64",
+    tool: "vcpkg",
+    platform: "darwin",
+    arch: "x64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("darwin", "vcpkg"),
+    version: "2026.02.27",
+    sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.02.27-darwin-arm64",
+    tool: "vcpkg",
+    platform: "darwin",
+    arch: "arm64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("darwin", "vcpkg"),
+    version: "2026.02.27",
+    sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
+    ]
   }
 ];
 
@@ -103,8 +165,11 @@ export function getToolCatalogEntries(
   tool: ToolName,
   compilerFamily?: CompilerFamily
 ): ToolCatalogEntry[] {
-  return WINDOWS_TOOL_CATALOG
-    .filter((entry) => entry.platform === hostAdapter.platform)
+  const arch = getHostArchLabel();
+
+  return TOOL_CATALOG
+    .filter((entry) => entry.platform === process.platform)
+    .filter((entry) => entry.arch === arch)
     .filter((entry) => entry.tool === tool)
     .filter((entry) => !compilerFamily || !entry.compilerFamily || entry.compilerFamily === compilerFamily)
     .sort((left, right) => compareVersionDesc(left.version, right.version));
