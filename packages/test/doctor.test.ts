@@ -129,6 +129,8 @@ test("doctor exits 0 with actionable warnings when system tools are available", 
     assert.match(stdout, /\[OK\] cmake:/);
     assert.match(stdout, /\[OK\] ninja:/);
     assert.match(stdout, /\[OK\] cxx:/);
+    assert.match(stdout, /\[OK\] cmake: .*external/);
+    assert.match(stdout, /\[OK\] cxx: .*system-detected/);
     assert.match(stdout, /\[WARN\] add:/);
     assert.match(stdout, /summary: blockers=0/);
   } finally {

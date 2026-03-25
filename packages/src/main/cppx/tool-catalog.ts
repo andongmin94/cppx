@@ -136,6 +136,62 @@ const TOOL_CATALOG: ToolCatalogEntry[] = [
       "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
       "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
     ]
+  },
+  {
+    id: "vcpkg-2026.03.18-linux-x64",
+    tool: "vcpkg",
+    platform: "linux",
+    arch: "x64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("linux", "vcpkg"),
+    version: "2026.03.18",
+    sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.03.18",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.03.18.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.03.18-linux-arm64",
+    tool: "vcpkg",
+    platform: "linux",
+    arch: "arm64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("linux", "vcpkg"),
+    version: "2026.03.18",
+    sha256: "528ff8708702e296b5744d9168c3fb4343c015fa024cd3770ede8ac94d9971b9",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.03.18",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.03.18.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.02.27-linux-x64",
+    tool: "vcpkg",
+    platform: "linux",
+    arch: "x64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("linux", "vcpkg"),
+    version: "2026.02.27",
+    sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
+    ]
+  },
+  {
+    id: "vcpkg-2026.02.27-linux-arm64",
+    tool: "vcpkg",
+    platform: "linux",
+    arch: "arm64",
+    sourceKind: "catalog-archive",
+    executable: getExecutableName("linux", "vcpkg"),
+    version: "2026.02.27",
+    sha256: "792b608bb511d350cbb5cb6175728f98490370b3ed45327b90b5a922cdde6094",
+    urls: [
+      "https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27",
+      "https://github.com/microsoft/vcpkg/archive/refs/tags/2026.02.27.zip"
+    ]
   }
 ];
 

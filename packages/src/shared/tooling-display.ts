@@ -15,6 +15,8 @@ export function getToolLifecycleProviderLabel(provider: ToolLifecycleProvider): 
       return "Homebrew";
     case "apt":
       return "apt";
+    case "pipx":
+      return "pipx";
     case "system":
       return "system";
     case "msvc":

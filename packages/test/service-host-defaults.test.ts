@@ -40,6 +40,21 @@ test("service host defaults follow the active host adapter policy", async () => 
     assert.equal(defaults.hostSupport.managedLifecycleReady, true);
     assert.equal(defaults.toolCapabilities.cmake.install, true);
     assert.equal(defaults.toolCapabilities.conan.install, false);
+  } else if (
+    hostAdapter.platform === "linux" &&
+    defaults.hostSupport.recommendedProvider === "apt"
+  ) {
+    assert.equal(defaults.hostSupport.tier, "official");
+    assert.equal(defaults.toolCapabilities.cmake.provider, "apt");
+    assert.equal(defaults.toolCapabilities.cmake.install, true);
+    assert.equal(defaults.toolCapabilities.vcpkg.provider, "archive");
+    assert.equal(defaults.toolPolicies.cmake.mode, "managed");
+    assert.equal(defaults.toolPolicies.ninja.mode, "managed");
+    assert.equal(defaults.toolPolicies.vcpkg.mode, "managed");
+    assert.equal(defaults.toolPolicies.cxx.mode, "managed");
+    assert.equal(defaults.toolPolicies.conan.mode, "managed");
+    assert.equal(defaults.toolCapabilities.conan.provider, "pipx");
+    assert.equal(defaults.toolCapabilities.conan.install, true);
   } else {
     assert.equal(defaults.toolCapabilities.conan.detect, true);
   }

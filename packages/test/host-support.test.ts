@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isPathManagedByApt,
   isPathManagedByHomebrew,
+  isPathManagedByPipx,
   parseLinuxOsRelease,
   resolveHostSupport,
   resolveToolLifecycleCapabilities
@@ -77,7 +79,8 @@ test("host support keeps macOS managed path disabled until Homebrew is available
 test("linux support narrows managed planning to Ubuntu 24.04", async () => {
   const ubuntu = await resolveHostSupport({
     platform: "linux",
-    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n'
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+    aptAvailable: true
   });
   const fedora = await resolveHostSupport({
     platform: "linux",
@@ -85,14 +88,30 @@ test("linux support narrows managed planning to Ubuntu 24.04", async () => {
   });
   const ubuntuCmake = await resolveToolLifecycleCapabilities("cmake", {
     platform: "linux",
-    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n'
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+    aptAvailable: true
+  });
+  const ubuntuVcpkg = await resolveToolLifecycleCapabilities("vcpkg", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+    aptAvailable: true
+  });
+  const ubuntuConan = await resolveToolLifecycleCapabilities("conan", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+    aptAvailable: true
   });
 
-  assert.equal(ubuntu.recommendedProvider, "system");
-  assert.equal(ubuntu.managedLifecycleReady, false);
+  assert.equal(ubuntu.tier, "official");
+  assert.equal(ubuntu.recommendedProvider, "apt");
+  assert.equal(ubuntu.managedLifecycleReady, true);
   assert.equal(fedora.recommendedProvider, "system");
-  assert.equal(ubuntuCmake.provider, "system");
-  assert.equal(ubuntuCmake.install, false);
+  assert.equal(ubuntuCmake.provider, "apt");
+  assert.equal(ubuntuCmake.install, true);
+  assert.equal(ubuntuVcpkg.provider, "archive");
+  assert.equal(ubuntuVcpkg.install, true);
+  assert.equal(ubuntuConan.provider, "pipx");
+  assert.equal(ubuntuConan.install, true);
 });
 
 test("linux os-release parser reads quoted fields", () => {
@@ -117,4 +136,16 @@ test("homebrew path detection recognizes common prefixes", () => {
     isPathManagedByHomebrew("/usr/bin/cmake", { prefix: "/opt/homebrew" }),
     false
   );
+});
+
+test("apt path detection recognizes common Ubuntu system prefixes", () => {
+  assert.equal(isPathManagedByApt("/usr/bin/cmake"), true);
+  assert.equal(isPathManagedByApt("/usr/lib/llvm-18/bin/clang++"), true);
+  assert.equal(isPathManagedByApt("/usr/local/bin/cmake"), false);
+});
+
+test("pipx path detection recognizes common user and managed prefixes", () => {
+  assert.equal(isPathManagedByPipx("/home/demo/.local/bin/conan"), true);
+  assert.equal(isPathManagedByPipx("/tmp/cppx/conan/bin/conan", { binDir: "/tmp/cppx/conan/bin" }), true);
+  assert.equal(isPathManagedByPipx("/usr/bin/conan"), false);
 });

@@ -16,6 +16,8 @@ export type ToolSourceKind =
   | "catalog-archive"
   | "catalog-git"
   | "catalog-github-release"
+  | "apt-managed"
+  | "pipx-managed"
   | "homebrew-managed"
   | "system-detected"
   | "msvc-detected";

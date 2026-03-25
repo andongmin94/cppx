@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -36,12 +37,75 @@ function getNativePosixTriplet(platform: HostPlatform): string {
   return `${arch}-linux`;
 }
 
+function parseLinuxOsReleaseText(
+  text: string
+): { id?: string; versionId?: string } {
+  const info: { id?: string; versionId?: string } = {};
+
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separator).trim().toUpperCase();
+    const rawValue = trimmed.slice(separator + 1).trim();
+    const value = rawValue.replace(/^"(.*)"$/, "$1").trim().toLowerCase();
+
+    if (key === "ID") {
+      info.id = value;
+    } else if (key === "VERSION_ID") {
+      info.versionId = value;
+    }
+  }
+
+  return info;
+}
+
+function readLinuxOsReleaseTextSync(): string | undefined {
+  const fromEnv = process.env.CPPX_LINUX_OS_RELEASE?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  if (process.platform !== "linux") {
+    return undefined;
+  }
+
+  try {
+    return readFileSync("/etc/os-release", "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function isSupportedUbuntu2404Host(): boolean {
+  const releaseText = readLinuxOsReleaseTextSync();
+  if (!releaseText) {
+    return false;
+  }
+
+  const parsed = parseLinuxOsReleaseText(releaseText);
+  return parsed.id === "ubuntu" && parsed.versionId?.startsWith("24.04") === true;
+}
+
 function getDefaultManagedModeForPosixTool(
   platform: Extract<HostPlatform, "darwin" | "linux">,
   tool: ToolName
 ): "managed" | "system" {
   if (platform === "darwin") {
     return tool === "cxx" || tool === "cmake" || tool === "ninja" || tool === "vcpkg" || tool === "conan"
+      ? "managed"
+      : "system";
+  }
+
+  if (isSupportedUbuntu2404Host()) {
+    return tool === "cmake" || tool === "ninja" || tool === "vcpkg" || tool === "cxx" || tool === "conan"
       ? "managed"
       : "system";
   }

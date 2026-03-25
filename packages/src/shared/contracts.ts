@@ -17,6 +17,7 @@ export type ToolLifecycleProvider =
   | "git"
   | "homebrew"
   | "apt"
+  | "pipx"
   | "system"
   | "msvc"
   | "unknown";

@@ -109,7 +109,7 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
   }
 });
 
-test("installAllTools fails clearly when managed lifecycle is not supported on the current host", async () => {
+test("installAllTools fails clearly when managed lifecycle is not supported on unsupported Linux hosts", async () => {
   if (process.platform !== "linux") {
     return;
   }
@@ -118,27 +118,139 @@ test("installAllTools fails clearly when managed lifecycle is not supported on t
   const { logger } = createLogger();
 
   try {
-    await withHostDataRoot(hostRoot, async () => {
-      await assert.rejects(
-        () =>
-          installAllTools(
+    await withEnv(
+      "CPPX_LINUX_OS_RELEASE",
+      'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n',
+      async () => {
+        await withHostDataRoot(hostRoot, async () => {
+          await assert.rejects(
+            () =>
+              installAllTools(
+                logger,
+                {
+                  cmake: { mode: "managed", version: "default" },
+                  ninja: { mode: "managed", version: "default" },
+                  vcpkg: { mode: "managed", version: "default" },
+                  cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+                },
+                "none"
+              ),
+            (error) => {
+              assert.ok(error instanceof CppxError);
+              assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
+              assert.match(error.details ?? "", /Ubuntu 24\.04/);
+              return true;
+            }
+          );
+        });
+      }
+    );
+  } finally {
+    await removeDir(hostRoot);
+  }
+});
+
+test("getToolStatus and resolveToolchainOrThrow surface pipx-managed conan on supported Linux hosts", async () => {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const hostRoot = await createTempDir("linux-managed-conan");
+  const { logger } = createLogger();
+  const hostAdapter = getHostAdapter();
+
+  try {
+    await withEnv(
+      "CPPX_LINUX_OS_RELEASE",
+      'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+      async () => {
+        await withHostDataRoot(hostRoot, async () => {
+          const cmake = path.join(getToolRoot("cmake"), "bin", hostAdapter.getExecutableName("cmake"));
+          const ninja = path.join(getToolRoot("ninja"), hostAdapter.getExecutableName("ninja"));
+          const conan = path.join(getToolRoot("conan"), "bin", hostAdapter.getExecutableName("conan"));
+          const cxx = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("clang++"));
+
+          await writeExecutable(cmake);
+          await writeExecutable(ninja);
+          await writeExecutable(conan);
+          await writeExecutable(cxx);
+
+          await upsertToolRecord({
+            name: "cmake",
+            executable: cmake,
+            root: getToolRoot("cmake"),
+            version: "3.28.3",
+            installedAt: "2026-03-25T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "ninja",
+            executable: ninja,
+            root: getToolRoot("ninja"),
+            version: "1.11.1",
+            installedAt: "2026-03-25T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "conan",
+            executable: conan,
+            root: getToolRoot("conan"),
+            version: "2.21.0",
+            installedAt: "2026-03-25T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "pipx-managed",
+            provider: "pipx",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "cxx",
+            executable: cxx,
+            root: getToolRoot("cxx"),
+            version: "18.1.3",
+            installedAt: "2026-03-25T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+
+          const status = await getToolStatus();
+          assert.equal(status.conan, true);
+          assert.equal(status.details?.conan?.provider, "pipx");
+          assert.equal(status.details?.conan?.sourceKind, "pipx-managed");
+          assert.equal(status.details?.conan?.ownership, "cppx");
+          assert.equal(status.details?.conan?.capabilities?.provider, "pipx");
+          assert.equal(status.details?.conan?.capabilities?.install, true);
+
+          const toolchain = await resolveToolchainOrThrow(
             logger,
             {
               cmake: { mode: "managed", version: "default" },
               ninja: { mode: "managed", version: "default" },
-              vcpkg: { mode: "managed", version: "default" },
+              conan: { mode: "managed", version: "default" },
               cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
             },
-            "none"
-          ),
-        (error) => {
-          assert.ok(error instanceof CppxError);
-          assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
-          assert.match(error.details ?? "", /managed 수명주기/);
-          return true;
-        }
-      );
-    });
+            "conan"
+          );
+
+          assert.equal(toolchain.cmake, cmake);
+          assert.equal(toolchain.ninja, ninja);
+          assert.equal(toolchain.cxx, cxx);
+          assert.deepEqual(toolchain.envPath, [
+            path.dirname(cmake),
+            path.dirname(ninja),
+            path.dirname(conan),
+            path.dirname(cxx)
+          ]);
+        });
+      }
+    );
   } finally {
     await removeDir(hostRoot);
   }
@@ -244,7 +356,7 @@ test("resolveToolchainOrThrow reports all missing managed tools", async () => {
           assert.ok(error instanceof CppxError);
           assert.match(error.message, /vcpkg/);
           assert.match(error.message, /cxx-compiler/);
-          if (process.platform !== "darwin") {
+          if (process.platform === "win32") {
             assert.match(error.message, /cmake/);
             assert.match(error.message, /ninja/);
           }

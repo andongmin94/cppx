@@ -21,7 +21,10 @@ import type {
 import {
   inferOwnership,
   inferProviderFromSourceKind,
+  isPathManagedByApt,
   isPathManagedByHomebrew,
+  isPathManagedByPipx,
+  resolveHostSupport,
   resolveToolLifecycleCapabilities
 } from "./host-support";
 import { runSpawn } from "./command-runner";
@@ -892,6 +895,20 @@ interface HomebrewToolSpec {
   compilerFamily?: CompilerFamily;
 }
 
+interface AptToolSpec {
+  packageName: string;
+  executable: string;
+  compilerFamily?: CompilerFamily;
+}
+
+interface PipxManagedLayout {
+  homeDir: string;
+  binDir: string;
+  executable: string;
+}
+
+let aptPackageIndexReady = false;
+
 function getHomebrewToolSpec(tool: ToolName): HomebrewToolSpec {
   switch (tool) {
     case "cmake":
@@ -911,6 +928,29 @@ function getHomebrewToolSpec(tool: ToolName): HomebrewToolSpec {
     default: {
       const neverTool: never = tool;
       throw new CppxError(`지원하지 않는 Homebrew 도구: ${String(neverTool)}`);
+    }
+  }
+}
+
+function getAptToolSpec(tool: ToolName): AptToolSpec {
+  switch (tool) {
+    case "cmake":
+      return { packageName: "cmake", executable: "cmake" };
+    case "ninja":
+      return { packageName: "ninja-build", executable: "ninja" };
+    case "vcpkg":
+      throw new CppxError("vcpkg는 apt가 아니라 아카이브 bootstrap 경로를 사용합니다.");
+    case "conan":
+      throw new CppxError("Linux conan은 현재 system 경로만 지원됩니다.");
+    case "cxx":
+      return {
+        packageName: "clang",
+        executable: "clang++",
+        compilerFamily: "mingw"
+      };
+    default: {
+      const neverTool: never = tool;
+      throw new CppxError(`지원하지 않는 apt 도구: ${String(neverTool)}`);
     }
   }
 }
@@ -1086,6 +1126,406 @@ async function installHomebrewManagedTool(
   return record;
 }
 
+async function resolveAptExecutable(): Promise<string | null> {
+  if (hostAdapter.platform !== "linux") {
+    return null;
+  }
+
+  return resolveExecutableFromPath(["apt-get"]);
+}
+
+function getManagedPipxLayout(tool: "conan"): PipxManagedLayout {
+  const toolRoot = getToolRoot(tool);
+  return {
+    homeDir: path.join(toolRoot, "pipx-home"),
+    binDir: path.join(toolRoot, "bin"),
+    executable: path.join(toolRoot, "bin", hostAdapter.getExecutableName("conan"))
+  };
+}
+
+function getManagedPipxEnv(tool: "conan"): NodeJS.ProcessEnv {
+  const layout = getManagedPipxLayout(tool);
+  return {
+    ...process.env,
+    PIPX_HOME: layout.homeDir,
+    PIPX_BIN_DIR: layout.binDir
+  };
+}
+
+async function resolvePipxExecutable(): Promise<string | null> {
+  if (hostAdapter.platform !== "linux") {
+    return null;
+  }
+
+  return resolveExecutableFromPath(["pipx"]);
+}
+
+async function getAptPackageVersion(packageName: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile(
+      "dpkg-query",
+      ["-W", "-f=${Version}", packageName],
+      { windowsHide: true }
+    );
+    const version = stdout.trim();
+    return version.length > 0 ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getConanVersion(executable: string): Promise<string> {
+  try {
+    const { stdout, stderr } = await execFile(executable, ["--version"], {
+      windowsHide: true
+    });
+    const combined = `${stdout}\n${stderr}`;
+    const match = combined.match(/Conan version\s+([^\s]+)/i);
+    return match?.[1]?.trim() || DEFAULT_TOOL_VERSION_TOKEN;
+  } catch {
+    return DEFAULT_TOOL_VERSION_TOKEN;
+  }
+}
+
+async function resolveAptToolExecutable(
+  tool: Exclude<ToolName, "vcpkg" | "conan">,
+  aptExecutable: string
+): Promise<{ executable: string; root: string; version: string; compilerFamily?: CompilerFamily } | null> {
+  const spec = getAptToolSpec(tool);
+  const executable = await resolveExecutableFromPath([hostAdapter.getExecutableName(spec.executable)]);
+  if (!executable || !isPathManagedByApt(executable)) {
+    return null;
+  }
+
+  const version =
+    (await getAptPackageVersion(spec.packageName)) ??
+    (await getAptPackageVersion(path.basename(aptExecutable))) ??
+    DEFAULT_TOOL_VERSION_TOKEN;
+
+  return {
+    executable,
+    root: path.dirname(executable),
+    version,
+    compilerFamily: spec.compilerFamily
+  };
+}
+
+function ensureSupportedAptVersionPolicy(
+  tool: ToolName,
+  policy: ToolPolicy | CompilerToolPolicy
+): void {
+  if (!isPinnedToolVersion(policy.version)) {
+    return;
+  }
+
+  throw new CppxError(
+    `${tool} apt exact version은 아직 지원되지 않습니다.`,
+    `requested=${policy.version}`
+  );
+}
+
+async function runAptCommand(args: string[], logger: CppxLogger): Promise<void> {
+  const direct = await resolveAptExecutable();
+  if (direct) {
+    try {
+      await runSpawn(
+        {
+          action: "install-tools",
+          command: direct,
+          args
+        },
+        logger
+      );
+      return;
+    } catch (error) {
+      const details = toMessage(error).toLowerCase();
+      if (
+        !details.includes("permission denied") &&
+        !details.includes("could not open lock file") &&
+        !details.includes("are you root")
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  const sudoExecutable = await resolveExecutableFromPath(["sudo"]);
+  if (!sudoExecutable || !direct) {
+    throw new CppxError(
+      "apt 실행 권한을 확보하지 못했습니다.",
+      "root 권한으로 실행하거나 passwordless sudo가 필요합니다."
+    );
+  }
+
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: sudoExecutable,
+      args: ["-n", direct, ...args]
+    },
+    logger
+  );
+}
+
+async function ensureAptPackageIndex(logger: CppxLogger): Promise<void> {
+  if (aptPackageIndexReady) {
+    return;
+  }
+
+  await runAptCommand(["update"], logger);
+  aptPackageIndexReady = true;
+}
+
+async function installAptManagedTool(
+  tool: Exclude<ToolName, "vcpkg" | "conan">,
+  policy: ToolPolicy | CompilerToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
+  if (hostAdapter.platform !== "linux") {
+    throw new CppxError(`${tool} apt managed 경로는 Linux에서만 지원됩니다.`);
+  }
+
+  ensureSupportedAptVersionPolicy(tool, policy);
+
+  const aptExecutable = await resolveAptExecutable();
+  if (!aptExecutable) {
+    throw new CppxError(
+      "apt-get을 찾지 못했습니다.",
+      "Ubuntu 24.04 managed 도구 설치를 사용하려면 apt-get이 필요합니다."
+    );
+  }
+
+  const spec = getAptToolSpec(tool);
+  const manifest = await readToolManifest();
+  const existingRecord = manifest.tools[tool];
+  const existing = await resolveAptToolExecutable(tool, aptExecutable);
+
+  if (existing) {
+    const ownedByCppx =
+      existingRecord?.provider === "apt" &&
+      (existingRecord.ownership ?? "unknown") === "cppx" &&
+      (existingRecord.mode ?? "managed") === "managed";
+    const record: ResolvedToolInfo = {
+      name: tool,
+      executable: existing.executable,
+      root: existing.root,
+      version: existing.version,
+      mode: "managed",
+      sourceKind: "apt-managed",
+      requestedVersion: policy.version,
+      resolvedVersion: existing.version,
+      compilerFamily: existing.compilerFamily,
+      provider: "apt",
+      ownership: ownedByCppx ? "cppx" : "external"
+    };
+    logger.info("install-tools", `${tool} 이미 설치됨 (apt: ${spec.packageName})`);
+    await registerTool(record);
+    return record;
+  }
+
+  await ensureAptPackageIndex(logger);
+  await runAptCommand(["install", "-y", spec.packageName], logger);
+
+  const installed = await resolveAptToolExecutable(tool, aptExecutable);
+  if (!installed) {
+    throw new CppxError(
+      `${tool} apt 설치 후 실행 파일을 찾지 못했습니다.`,
+      spec.packageName
+    );
+  }
+
+  const record: ResolvedToolInfo = {
+    name: tool,
+    executable: installed.executable,
+    root: installed.root,
+    version: installed.version,
+    mode: "managed",
+    sourceKind: "apt-managed",
+    requestedVersion: policy.version,
+    resolvedVersion: installed.version,
+    compilerFamily: installed.compilerFamily,
+    provider: "apt",
+    ownership: "cppx"
+  };
+  await registerTool(record);
+  logger.success("install-tools", `${tool} 설치됨: ${installed.executable}`);
+  return record;
+}
+
+async function ensurePipxAvailable(logger: CppxLogger): Promise<string> {
+  let pipxExecutable = await resolvePipxExecutable();
+  if (pipxExecutable) {
+    return pipxExecutable;
+  }
+
+  await ensureAptPackageIndex(logger);
+  await runAptCommand(["install", "-y", "pipx"], logger);
+
+  pipxExecutable = await resolvePipxExecutable();
+  if (pipxExecutable) {
+    return pipxExecutable;
+  }
+
+  throw new CppxError(
+    "pipx를 찾지 못했습니다.",
+    "Ubuntu 24.04 managed conan 설치를 사용하려면 pipx가 필요합니다."
+  );
+}
+
+async function resolveCppxManagedPipxConan(): Promise<{
+  executable: string;
+  root: string;
+  version: string;
+  provider: ToolLifecycleProvider;
+} | null> {
+  const layout = getManagedPipxLayout("conan");
+  if (!(await pathExists(layout.executable))) {
+    return null;
+  }
+
+  return {
+    executable: layout.executable,
+    root: getToolRoot("conan"),
+    version: await getConanVersion(layout.executable),
+    provider: "pipx"
+  };
+}
+
+async function resolveExternalPipxConan(): Promise<{
+  executable: string;
+  root: string;
+  version: string;
+  provider: ToolLifecycleProvider;
+} | null> {
+  const executable = await resolveExecutableFromPath(EXECUTABLE_CANDIDATES_BY_TOOL.conan);
+  if (!executable || !isPathManagedByPipx(executable)) {
+    return null;
+  }
+
+  return {
+    executable,
+    root: path.dirname(executable),
+    version: await getConanVersion(executable),
+    provider: "pipx"
+  };
+}
+
+async function installPipxManagedConan(
+  policy: ToolPolicy,
+  logger: CppxLogger
+): Promise<ResolvedToolInfo> {
+  if (hostAdapter.platform !== "linux") {
+    throw new CppxError("pipx managed conan 경로는 Linux에서만 지원됩니다.");
+  }
+
+  const manifest = await readToolManifest();
+  const existingRecord = manifest.tools.conan;
+  const managed = await resolveCppxManagedPipxConan();
+  const requestedPinned = isPinnedToolVersion(policy.version);
+
+  if (managed && (!requestedPinned || managed.version === policy.version)) {
+    const record: ResolvedToolInfo = {
+      name: "conan",
+      executable: managed.executable,
+      root: managed.root,
+      version: managed.version,
+      mode: "managed",
+      sourceKind: "pipx-managed",
+      requestedVersion: policy.version,
+      resolvedVersion: managed.version,
+      provider: "pipx",
+      ownership: "cppx"
+    };
+    logger.info("install-tools", `conan 이미 설치됨 (pipx: ${managed.executable})`);
+    await registerTool(record);
+    return record;
+  }
+
+  if (!requestedPinned) {
+    const external = await resolveExternalPipxConan();
+    if (external) {
+      const record: ResolvedToolInfo = {
+        name: "conan",
+        executable: external.executable,
+        root: external.root,
+        version: external.version,
+        mode: "managed",
+        sourceKind: "pipx-managed",
+        requestedVersion: policy.version,
+        resolvedVersion: external.version,
+        provider: "pipx",
+        ownership:
+          existingRecord?.provider === "pipx" && (existingRecord.ownership ?? "unknown") === "cppx"
+            ? "cppx"
+            : "external"
+      };
+      logger.info("install-tools", `conan 이미 설치됨 (external pipx: ${external.executable})`);
+      await registerTool(record);
+      return record;
+    }
+  }
+
+  const pipxExecutable = await ensurePipxAvailable(logger);
+  const layout = getManagedPipxLayout("conan");
+  const pipxEnv = getManagedPipxEnv("conan");
+  await ensureDir(layout.homeDir);
+  await ensureDir(layout.binDir);
+
+  const packageSpec = requestedPinned ? `conan==${policy.version}` : "conan";
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: pipxExecutable,
+      args: ["install", "--force", packageSpec],
+      env: pipxEnv
+    },
+    logger
+  );
+
+  const installed = await resolveCppxManagedPipxConan();
+  if (!installed) {
+    throw new CppxError(
+      "conan pipx 설치 후 실행 파일을 찾지 못했습니다.",
+      layout.executable
+    );
+  }
+
+  const record: ResolvedToolInfo = {
+    name: "conan",
+    executable: installed.executable,
+    root: installed.root,
+    version: installed.version,
+    mode: "managed",
+    sourceKind: "pipx-managed",
+    requestedVersion: policy.version,
+    resolvedVersion: installed.version,
+    provider: "pipx",
+    ownership: "cppx"
+  };
+  await registerTool(record);
+  logger.success("install-tools", `conan 설치됨: ${installed.executable}`);
+  return record;
+}
+
+async function inferSystemProvider(executable: string): Promise<ToolLifecycleProvider> {
+  if (hostAdapter.platform === "darwin" && isPathManagedByHomebrew(executable)) {
+    return "homebrew";
+  }
+
+  if (hostAdapter.platform === "linux" && isPathManagedByApt(executable)) {
+    const support = await resolveHostSupport();
+    if (support.recommendedProvider === "apt") {
+      return "apt";
+    }
+  }
+
+  if (hostAdapter.platform === "linux" && isPathManagedByPipx(executable)) {
+    return "pipx";
+  }
+
+  return "system";
+}
+
 async function resolveSystemTool(
   tool: Exclude<ToolName, "cxx">,
   policy: ToolPolicy
@@ -1095,10 +1535,7 @@ async function resolveSystemTool(
     return null;
   }
 
-  const provider =
-    hostAdapter.platform === "darwin" && isPathManagedByHomebrew(executable)
-      ? "homebrew"
-      : "system";
+  const provider = await inferSystemProvider(executable);
 
   return {
     name: tool,
@@ -1143,6 +1580,8 @@ async function resolveSystemCompiler(
     return null;
   }
 
+  const provider = await inferSystemProvider(executable);
+
   return {
     name: "cxx",
     executable,
@@ -1153,10 +1592,7 @@ async function resolveSystemCompiler(
     requestedVersion: policy.version,
     resolvedVersion: policy.version,
     compilerFamily: inferCompilerFamily(executable),
-    provider:
-      hostAdapter.platform === "darwin" && isPathManagedByHomebrew(executable)
-        ? "homebrew"
-        : "system",
+    provider,
     ownership: "external"
   };
 }
@@ -1379,6 +1815,11 @@ async function installCxxCompiler(
     return installHomebrewManagedTool("cxx", policy, logger);
   }
 
+  if (hostAdapter.platform === "linux") {
+    logger.info("install-tools", "apt 기반 clang++ C++ 컴파일러를 설치합니다.");
+    return installAptManagedTool("cxx", policy, logger);
+  }
+
   const source = await resolveLatestCxxSource(policy, logger);
   return installArchiveToolFromSource("cxx", source, logger);
 }
@@ -1480,7 +1921,11 @@ async function installConan(
     return installHomebrewManagedTool("conan", policy, logger);
   }
 
-  throw new CppxError("conan managed 설치는 현재 macOS Homebrew 경로만 지원됩니다.");
+  if (hostAdapter.platform === "linux") {
+    return installPipxManagedConan(policy, logger);
+  }
+
+  throw new CppxError("conan managed 설치는 현재 macOS Homebrew 또는 Ubuntu 24.04 pipx 경로만 지원됩니다.");
 }
 
 function formatInstallError(tool: ToolName, error: unknown): string {
@@ -1568,6 +2013,8 @@ export async function installAllTools(
       cmake =
         hostAdapter.platform === "darwin"
           ? await installHomebrewManagedTool("cmake", policies.cmake, logger)
+          : hostAdapter.platform === "linux"
+            ? await installAptManagedTool("cmake", policies.cmake, logger)
           : await installStaticArchiveTool("cmake", policies.cmake, logger);
     }
   } catch (error) {
@@ -1586,6 +2033,8 @@ export async function installAllTools(
       ninja =
         hostAdapter.platform === "darwin"
           ? await installHomebrewManagedTool("ninja", policies.ninja, logger)
+          : hostAdapter.platform === "linux"
+            ? await installAptManagedTool("ninja", policies.ninja, logger)
           : await installStaticArchiveTool("ninja", policies.ninja, logger);
     }
   } catch (error) {
@@ -1641,7 +2090,12 @@ export async function installAllTools(
       }
     } else {
       ensureManagedLifecycleSupportedOrThrow("cxx", cxxCapabilities);
-      logger.info("install-tools", "llvm-mingw 기반 C++ 컴파일러를 설치합니다.");
+      logger.info(
+        "install-tools",
+        hostAdapter.platform === "linux"
+          ? "Ubuntu managed C++ 컴파일러를 설치합니다."
+          : "llvm-mingw 기반 C++ 컴파일러를 설치합니다."
+      );
       cxx = await installCxxCompiler(policies.cxx, logger);
     }
   } catch (error) {
@@ -1728,9 +2182,23 @@ function getMatchingSystemRecord(
   return hostAdapter.comparePaths(record.executable, executable) === 0 ? record : undefined;
 }
 
+function getMatchingManagedRecord(record: ToolRecord | undefined): ToolRecord | undefined {
+  if (!record || (record.mode ?? "managed") !== "managed") {
+    return undefined;
+  }
+
+  return record;
+}
+
 function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
   if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
     return "homebrew-managed";
+  }
+  if (hostAdapter.platform === "linux" && tool === "conan") {
+    return "pipx-managed";
+  }
+  if (hostAdapter.platform === "linux" && (tool === "cmake" || tool === "ninja" || tool === "cxx")) {
+    return "apt-managed";
   }
   if (tool === "cxx") {
     return "catalog-github-release";
@@ -1744,19 +2212,19 @@ async function resolveManagedToolExecutable(
   policy?: ToolPolicy | CompilerToolPolicy
 ): Promise<ResolvedToolExecutable | null> {
   const record = manifest.tools[tool];
+  const managedRecord = getMatchingManagedRecord(record);
   if (
-    record &&
-    (record.mode ?? "managed") === "managed" &&
-    typeof record.executable === "string" &&
-    record.executable.trim().length > 0 &&
-    (await pathExists(record.executable))
+    managedRecord &&
+    typeof managedRecord.executable === "string" &&
+    managedRecord.executable.trim().length > 0 &&
+    (await pathExists(managedRecord.executable))
   ) {
-    return buildResolvedExecutable(record.executable, record.root, record, {
+    return buildResolvedExecutable(managedRecord.executable, managedRecord.root, managedRecord, {
       mode: "managed",
       sourceKind: getManagedFallbackSourceKind(tool),
       requestedVersion: policy?.version,
-      resolvedVersion: record.version
-      });
+      resolvedVersion: managedRecord.version
+    });
   }
 
   if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
@@ -1768,7 +2236,7 @@ async function resolveManagedToolExecutable(
           record?.provider === "homebrew" && (record.ownership ?? "unknown") === "cppx"
             ? "cppx"
             : "external";
-        return buildResolvedExecutable(homebrew.executable, homebrew.root, record, {
+        return buildResolvedExecutable(homebrew.executable, homebrew.root, managedRecord, {
           mode: "managed",
           sourceKind: "homebrew-managed",
           requestedVersion: policy?.version,
@@ -1781,6 +2249,74 @@ async function resolveManagedToolExecutable(
     }
   }
 
+  if (hostAdapter.platform === "linux" && (tool === "cmake" || tool === "ninja" || tool === "cxx")) {
+    const support = await resolveHostSupport();
+    if (support.recommendedProvider === "apt") {
+      const aptExecutable = await resolveAptExecutable();
+      if (aptExecutable) {
+        const aptTool = await resolveAptToolExecutable(tool, aptExecutable);
+        if (aptTool) {
+          const ownership =
+            record?.provider === "apt" && (record.ownership ?? "unknown") === "cppx"
+              ? "cppx"
+              : "external";
+          return buildResolvedExecutable(aptTool.executable, aptTool.root, managedRecord, {
+            mode: "managed",
+            sourceKind: "apt-managed",
+            requestedVersion: policy?.version,
+            resolvedVersion: aptTool.version,
+            compilerFamily: aptTool.compilerFamily,
+            provider: "apt",
+            ownership
+          });
+        }
+      }
+    }
+  }
+
+  if (hostAdapter.platform === "linux" && tool === "conan") {
+    const support = await resolveHostSupport();
+    if (support.recommendedProvider === "apt") {
+      const managedPipxConan = await resolveCppxManagedPipxConan();
+      if (managedPipxConan) {
+        return buildResolvedExecutable(
+          managedPipxConan.executable,
+          managedPipxConan.root,
+          managedRecord,
+          {
+            mode: "managed",
+            sourceKind: "pipx-managed",
+            requestedVersion: policy?.version,
+            resolvedVersion: managedPipxConan.version,
+            provider: "pipx",
+            ownership: "cppx"
+          }
+        );
+      }
+
+      const externalPipxConan = await resolveExternalPipxConan();
+      if (externalPipxConan) {
+        const ownership =
+          record?.provider === "pipx" && (record.ownership ?? "unknown") === "cppx"
+            ? "cppx"
+            : "external";
+        return buildResolvedExecutable(
+          externalPipxConan.executable,
+          externalPipxConan.root,
+          managedRecord,
+          {
+            mode: "managed",
+            sourceKind: "pipx-managed",
+            requestedVersion: policy?.version,
+            resolvedVersion: externalPipxConan.version,
+            provider: "pipx",
+            ownership
+          }
+        );
+      }
+    }
+  }
+
   const toolRoot = getToolRoot(tool);
   if (!(await pathExists(toolRoot))) {
     return null;
@@ -1789,11 +2325,11 @@ async function resolveManagedToolExecutable(
   for (const candidate of EXECUTABLE_CANDIDATES_BY_TOOL[tool]) {
     const found = await findFileRecursive(toolRoot, candidate);
     if (found) {
-      return buildResolvedExecutable(found, record?.root ?? toolRoot, record, {
+      return buildResolvedExecutable(found, managedRecord?.root ?? toolRoot, managedRecord, {
         mode: "managed",
         sourceKind: getManagedFallbackSourceKind(tool),
         requestedVersion: policy?.version,
-        resolvedVersion: record?.version ?? policy?.version
+        resolvedVersion: managedRecord?.version ?? policy?.version
       });
     }
   }

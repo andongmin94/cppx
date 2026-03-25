@@ -84,6 +84,18 @@ test("linux host adapter provides native defaults and commands", async () => {
   }
 });
 
+test("linux host adapter enables Ubuntu 24.04 managed defaults when os-release matches the official host", async () => {
+  await withEnv("CPPX_LINUX_OS_RELEASE", 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n', async () => {
+    const adapter = createHostAdapter("linux");
+
+    assert.equal(adapter.getDefaultToolMode("cmake"), "managed");
+    assert.equal(adapter.getDefaultToolMode("ninja"), "managed");
+    assert.equal(adapter.getDefaultToolMode("vcpkg"), "managed");
+    assert.equal(adapter.getDefaultToolMode("cxx"), "managed");
+    assert.equal(adapter.getDefaultToolMode("conan"), "managed");
+  });
+});
+
 test("darwin host adapter uses Application Support and native triplets", async () => {
   const adapter = createHostAdapter("darwin");
   const expectedRoot = path.join(os.homedir(), "Library", "Application Support");

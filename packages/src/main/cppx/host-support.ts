@@ -24,6 +24,11 @@ interface HomebrewInfo {
   prefix?: string;
 }
 
+interface AptInfo {
+  available: boolean;
+  executable?: string;
+}
+
 export interface HostSupportContext {
   platform?: HostPlatform;
   arch?: string;
@@ -32,6 +37,8 @@ export interface HostSupportContext {
   homebrewAvailable?: boolean;
   homebrewExecutable?: string | null;
   homebrewPrefix?: string | null;
+  aptAvailable?: boolean;
+  aptExecutable?: string | null;
 }
 
 const execFile = promisify(execFileCb);
@@ -57,6 +64,10 @@ function parseVersionMajor(version?: string | null): number | null {
 export function isSupportedMacOsVersion(version?: string | null): boolean {
   const major = parseVersionMajor(version);
   return major !== null && major >= 14;
+}
+
+export function isSupportedUbuntuVersion(version?: string | null): boolean {
+  return typeof version === "string" && version.startsWith("24.04");
 }
 
 export function parseLinuxOsRelease(text: string): LinuxReleaseInfo {
@@ -175,6 +186,35 @@ async function resolveHomebrewInfo(context: HostSupportContext): Promise<Homebre
   }
 }
 
+async function resolveAptInfo(context: HostSupportContext): Promise<AptInfo> {
+  if (context.platform !== "linux") {
+    return { available: false };
+  }
+
+  if (typeof context.aptAvailable === "boolean") {
+    return {
+      available: context.aptAvailable,
+      executable: context.aptExecutable?.trim() || undefined
+    };
+  }
+
+  if (process.platform !== "linux") {
+    return { available: false };
+  }
+
+  try {
+    await execFile("apt-get", ["--version"], {
+      windowsHide: true
+    });
+    return {
+      available: true,
+      executable: "apt-get"
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
 export function isPathManagedByHomebrew(
   executablePath: string,
   options: { prefix?: string | null } = {}
@@ -192,6 +232,36 @@ export function isPathManagedByHomebrew(
     normalized.startsWith("/usr/local/bin/") ||
     normalized.startsWith("/opt/homebrew/bin/") ||
     normalized.includes("/Homebrew/")
+  );
+}
+
+export function isPathManagedByApt(executablePath: string): boolean {
+  const normalized = executablePath.replaceAll("\\", "/");
+  if (normalized.startsWith("/usr/local/")) {
+    return false;
+  }
+
+  return (
+    normalized.startsWith("/usr/bin/") ||
+    normalized.startsWith("/bin/") ||
+    normalized.startsWith("/usr/lib/llvm-")
+  );
+}
+
+export function isPathManagedByPipx(
+  executablePath: string,
+  options: { binDir?: string | null } = {}
+): boolean {
+  const normalized = executablePath.replaceAll("\\", "/");
+  const binDir = options.binDir?.trim().replaceAll("\\", "/");
+  if (binDir && normalized.startsWith(`${binDir}/`)) {
+    return true;
+  }
+
+  return (
+    normalized.includes("/.local/bin/") ||
+    normalized.includes("/pipx/venvs/") ||
+    normalized.includes("/pipx/bin/")
   );
 }
 
@@ -223,14 +293,14 @@ export async function resolveHostSupport(
     const notes: string[] = [];
 
     if (supported) {
-      notes.push("공식 macOS 경로는 Homebrew 기반 managed 수명주기를 사용합니다.");
-      notes.push("vcpkg는 검증된 아카이브를 내려받아 bootstrap합니다.");
+      notes.push("Official macOS managed flow uses Homebrew.");
+      notes.push("vcpkg uses a verified archive/bootstrap path.");
       if (!homebrew.available) {
-        notes.push("Homebrew가 감지되지 않았습니다. managed 설치를 쓰려면 먼저 Homebrew를 준비해야 합니다.");
+        notes.push("Homebrew is required before macOS managed installs can run.");
       }
     } else {
-      notes.push("macOS managed 경로는 14 이상을 공식 지원 대상으로 가정합니다.");
-      notes.push("지원 범위 밖에서는 system 모드로만 보수적으로 안내합니다.");
+      notes.push("Managed macOS support is limited to macOS 14 and newer.");
+      notes.push("Other macOS versions fall back to conservative system mode.");
     }
 
     return {
@@ -244,13 +314,37 @@ export async function resolveHostSupport(
     };
   }
 
-  const release = await readLinuxOsRelease({ ...context, platform });
+  const [release, apt] = await Promise.all([
+    readLinuxOsRelease({ ...context, platform }),
+    resolveAptInfo({ ...context, platform })
+  ]);
   const distroId = release?.id;
   const distroVersion = release?.versionId;
-  const isUbuntu2404 =
-    distroId === "ubuntu" &&
-    typeof distroVersion === "string" &&
-    distroVersion.startsWith("24.04");
+  const isUbuntu2404 = distroId === "ubuntu" && isSupportedUbuntuVersion(distroVersion);
+
+  if (isUbuntu2404) {
+    const notes = [
+      "Official Linux managed support is limited to Ubuntu 24.04.",
+      "Ubuntu 24.04 uses apt for managed core tools and archive/bootstrap for vcpkg.",
+      "Ubuntu 24.04 uses pipx-managed Conan to avoid mutating the system Python environment."
+    ];
+
+    if (!apt.available) {
+      notes.push("apt-get was not found, so managed lifecycle stays unavailable.");
+    }
+
+    return {
+      platform,
+      arch,
+      hostLabel: release?.prettyName ?? `Ubuntu 24.04 (${arch})`,
+      tier: "official",
+      managedLifecycleReady: apt.available,
+      recommendedProvider: "apt",
+      distroId,
+      distroVersion,
+      notes
+    };
+  }
 
   return {
     platform,
@@ -258,20 +352,15 @@ export async function resolveHostSupport(
     hostLabel:
       release?.prettyName ??
       (distroId ? `Linux (${distroId}${distroVersion ? ` ${distroVersion}` : ""})` : `Linux ${arch}`),
-    tier: isUbuntu2404 ? "best-effort" : "best-effort",
+    tier: "best-effort",
     managedLifecycleReady: false,
     recommendedProvider: "system",
     distroId,
     distroVersion,
-    notes: isUbuntu2404
-      ? [
-          "현재 릴리스에서는 system 도구 기반으로만 동작합니다.",
-          "Ubuntu 24.04 apt managed 경로는 이후 마일스톤에서 추가됩니다."
-        ]
-      : [
-          "이 Linux 배포판에서는 현재 system 모드만 지원합니다.",
-          "관리형 Linux 경로는 Ubuntu 24.04를 기준으로 먼저 지원할 예정입니다."
-        ]
+    notes: [
+      "Managed Linux support is limited to Ubuntu 24.04.",
+      "Unsupported Linux distributions stay in conservative system mode."
+    ]
   };
 }
 
@@ -301,7 +390,7 @@ export async function resolveToolLifecycleCapabilities(
       return createLifecycleCapabilities(
         "system",
         { detect: true, install: false, repair: false, remove: false },
-        "Windows에서는 conan 명령을 PATH에서 감지합니다. managed 설치는 아직 지원되지 않습니다."
+        "Windows currently detects conan from PATH only."
       );
     }
 
@@ -309,7 +398,7 @@ export async function resolveToolLifecycleCapabilities(
       return createLifecycleCapabilities(
         "archive",
         { detect: true, install: true, repair: true, remove: true },
-        "Windows에서는 MinGW managed 설치를 지원하고 MSVC는 system 감지만 지원합니다."
+        "Windows manages MinGW toolchains and detects MSVC separately."
       );
     }
 
@@ -327,14 +416,14 @@ export async function resolveToolLifecycleCapabilities(
         return createLifecycleCapabilities(
           "archive",
           { detect: true, install: true, repair: true, remove: true },
-          "macOS에서는 검증된 아카이브를 내려받아 vcpkg를 bootstrap합니다."
+          "macOS uses a verified archive/bootstrap path for vcpkg."
         );
       }
 
       return createLifecycleCapabilities(
         "archive",
         { detect: true, install: false, repair: false, remove: false },
-        "공식 지원 범위(macOS 14+) 밖에서는 vcpkg managed 경로를 보장하지 않습니다."
+        "Managed vcpkg support is limited to official macOS hosts."
       );
     }
 
@@ -343,8 +432,8 @@ export async function resolveToolLifecycleCapabilities(
         "homebrew",
         { detect: true, install: true, repair: true, remove: true },
         tool === "cxx"
-          ? "macOS managed C++ 도구는 Homebrew llvm formula를 사용합니다."
-          : "macOS managed 도구는 Homebrew formula를 사용합니다."
+          ? "macOS managed C++ installs the Homebrew llvm toolchain."
+          : "macOS managed tools use Homebrew formulas."
       );
     }
 
@@ -352,18 +441,74 @@ export async function resolveToolLifecycleCapabilities(
       "homebrew",
       { detect: true, install: false, repair: false, remove: false },
       support.tier === "official"
-        ? "Homebrew가 준비되면 managed 설치를 사용할 수 있습니다."
-        : "공식 지원 범위(macOS 14+) 밖에서는 Homebrew managed 경로를 보장하지 않습니다."
+        ? "Homebrew must be available before macOS managed installs can run."
+        : "Managed macOS support is limited to official macOS hosts."
     );
   }
 
   if (support.platform === "linux") {
+    if (tool === "vcpkg") {
+      if (support.tier === "official") {
+        return createLifecycleCapabilities(
+          "archive",
+          { detect: true, install: true, repair: true, remove: true },
+          "Ubuntu 24.04 manages vcpkg through the verified archive/bootstrap path."
+        );
+      }
+
+      return createLifecycleCapabilities(
+        "archive",
+        { detect: true, install: false, repair: false, remove: false },
+        "Managed Linux vcpkg support is limited to Ubuntu 24.04."
+      );
+    }
+
+    if (tool === "conan") {
+      if (support.recommendedProvider === "apt") {
+        if (support.managedLifecycleReady) {
+          return createLifecycleCapabilities(
+            "pipx",
+            { detect: true, install: true, repair: true, remove: true },
+            "Ubuntu 24.04 managed Conan uses pipx."
+          );
+        }
+
+        return createLifecycleCapabilities(
+          "pipx",
+          { detect: true, install: false, repair: false, remove: false },
+          "apt-get must be available before Ubuntu managed Conan installs can run."
+        );
+      }
+
+      return createLifecycleCapabilities(
+        "system",
+        { detect: true, install: false, repair: false, remove: false },
+        "Unsupported Linux distributions use system conan only."
+      );
+    }
+
+    if (support.recommendedProvider === "apt") {
+      if (support.managedLifecycleReady) {
+        return createLifecycleCapabilities(
+          "apt",
+          { detect: true, install: true, repair: true, remove: true },
+          tool === "cxx"
+            ? "Ubuntu 24.04 managed C++ installs clang via apt."
+            : "Ubuntu 24.04 managed core tools use apt."
+        );
+      }
+
+      return createLifecycleCapabilities(
+        "apt",
+        { detect: true, install: false, repair: false, remove: false },
+        "apt-get must be available before Ubuntu managed installs can run."
+      );
+    }
+
     return createLifecycleCapabilities(
       "system",
       { detect: true, install: false, repair: false, remove: false },
-      support.distroId === "ubuntu" && support.distroVersion?.startsWith("24.04")
-        ? "현재 릴리스에서는 system 도구 기반으로만 동작합니다. Ubuntu 24.04 apt managed 경로는 이후 마일스톤에서 추가됩니다."
-        : "이 Linux 배포판에서는 아직 managed 수명주기를 지원하지 않습니다."
+      "Managed Linux support is limited to Ubuntu 24.04."
     );
   }
 
@@ -382,6 +527,10 @@ export function inferProviderFromSourceKind(sourceKind?: ToolSourceKind): ToolLi
       return "archive";
     case "catalog-git":
       return "git";
+    case "apt-managed":
+      return "apt";
+    case "pipx-managed":
+      return "pipx";
     case "homebrew-managed":
       return "homebrew";
     case "msvc-detected":

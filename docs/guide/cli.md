@@ -1,19 +1,19 @@
-# CLI 사용법
+# CLI Guide
 
-`cppx` CLI는 C++ 프로젝트를 `init -> add -> build -> run -> test -> pack` 흐름으로 다루기 위한 인터페이스입니다.
+`cppx` CLI drives a C++ project through the `init -> add -> build -> run -> test -> pack` workflow.
 
-## 실행 형식
+## Usage
 
 ```bash
 cd packages
 npm run cppx -- <command> [options]
 ```
 
-## 명령어
+## Commands
 
 ### `install-tools`
 
-호스트 정책에 따라 CMake, Ninja, vcpkg, conan, C++ 컴파일러를 준비합니다.
+Prepare host tools for the active platform.
 
 ```bash
 npm run cppx -- install-tools
@@ -21,48 +21,56 @@ npm run cppx -- install-tools --compiler mingw
 npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
 ```
 
-옵션:
+Options:
 
-| 옵션 | 설명 |
+| Option | Meaning |
 |---|---|
-| `--compiler <mingw|msvc>` | 컴파일러 계열 선택 |
-| `--msvc-installation-path <path>` | 특정 MSVC 설치 경로 우선 사용 |
+| `--compiler <mingw|msvc>` | Choose the compiler family |
+| `--msvc-installation-path <path>` | Prefer a specific MSVC installation |
 
-- Windows에서는 archive 기반 managed 도구를 설치하고, MSVC는 system 감지로 등록합니다.
-- macOS 14+에서는 Homebrew 기반 managed 도구와 archive 기반 `vcpkg` 경로를 사용합니다.
-- Linux에서는 현재 system 도구를 확인하고 manifest를 갱신합니다.
+Provider summary:
+
+- Windows: verified archive installs, plus system MSVC detection
+- macOS 14+: Homebrew for core tools and archive/bootstrap for `vcpkg`
+- Ubuntu 24.04: `apt` for `cmake`, `ninja`, `clang++`, archive/bootstrap for `vcpkg`, and `pipx` for `conan`
+- Other Linux: system detection only
+
+Linux note:
+
+- Ubuntu 24.04 is the only official Linux managed host in this slice.
+- Unsupported Linux distributions still stay system-only.
 
 ### `init [workspace]`
 
-새 프로젝트를 초기화합니다.
+Create a new project.
 
 ```bash
 npm run cppx -- init ./myapp --name myapp
 npm run cppx -- init ./myapp --name myapp --backend conan
 ```
 
-옵션:
+Options:
 
-| 옵션 | 설명 |
+| Option | Meaning |
 |---|---|
-| `-n, --name <name>` | 프로젝트 이름 |
-| `--backend <vcpkg|conan|none>` | 초기 dependency backend 선택 |
+| `-n, --name <name>` | Project name |
+| `--backend <vcpkg|conan|none>` | Initial dependency backend |
 
 ### `add <dependency> [workspace]`
 
-의존성을 `.cppx/config.toml`에 추가합니다.
+Add a dependency to `.cppx/config.toml`.
 
 ```bash
 npm run cppx -- add fmt ./myapp
 ```
 
-- `vcpkg`: 다음 sync 때 `build/.cppx/vcpkg.json`에 반영됩니다.
-- `conan`: 다음 sync 때 `build/.cppx/conanfile.txt`에 반영됩니다.
-- `none`: 명령이 실패합니다.
+- `vcpkg`: written into `build/.cppx/vcpkg.json` on the next sync
+- `conan`: written into `build/.cppx/conanfile.txt` on the next sync
+- `none`: rejected
 
 ### `build [workspace]`
 
-선택한 preset으로 configure + build를 실행합니다.
+Run configure + build for the selected preset.
 
 ```bash
 npm run cppx -- build ./myapp
@@ -71,7 +79,7 @@ npm run cppx -- build ./myapp --preset release-x64
 
 ### `run [workspace]`
 
-먼저 build를 실행한 뒤 바이너리를 실행합니다.
+Build first, then run the preset binary.
 
 ```bash
 npm run cppx -- run ./myapp
@@ -79,7 +87,7 @@ npm run cppx -- run ./myapp
 
 ### `test [workspace]`
 
-CTest preset을 실행합니다.
+Run the CTest preset.
 
 ```bash
 npm run cppx -- test ./myapp
@@ -87,7 +95,7 @@ npm run cppx -- test ./myapp
 
 ### `pack [workspace]`
 
-CPack preset을 실행합니다.
+Run the CPack preset.
 
 ```bash
 npm run cppx -- pack ./myapp
@@ -95,47 +103,47 @@ npm run cppx -- pack ./myapp
 
 ### `status [workspace]`
 
-도구 설치 상태와 provenance를 확인합니다.
+Inspect tool readiness and provenance.
 
 ```bash
 npm run cppx -- status
 npm run cppx -- status ./myapp
 ```
 
-가능하면 다음 정보를 함께 보여 줍니다.
+The output shows:
 
-- `managed` / `system`
-- provider (`archive`, `homebrew`, `system`, `msvc`)
-- ownership (`cppx-owned`, `external`)
-- 해석된 버전
-- 실행 파일 경로
+- `managed` vs `system`
+- provider (`archive`, `homebrew`, `apt`, `pipx`, `system`, `msvc`)
+- ownership (`cppx-owned` vs `external`)
+- requested / resolved version
+- executable path
 
 ### `doctor [workspace]`
 
-현재 host와 workspace 기준으로 blocker, warning, next steps를 보여 줍니다.
+Show blockers, warnings, and next steps for the current host and workspace.
 
 ```bash
 npm run cppx -- doctor
 npm run cppx -- doctor ./myapp
 ```
 
-`doctor`는 다음을 점검합니다.
+`doctor` checks:
 
-- host 지원 수준과 provider 경로
+- host support tier and provider path
 - `cmake`, `ninja`, `ctest`, `cpack`, `cxx`
-- 활성 backend에 필요한 `vcpkg` 또는 `conan`
-- `.cppx/config.toml`과 `build/.cppx`
+- `vcpkg` or `conan` when the active backend requires them
+- `.cppx/config.toml` and generated `build/.cppx` files
 
-blocker가 하나라도 있으면 종료 코드는 `1`입니다.
+The command exits with code `1` when blockers remain.
 
-## backend 동작
+## Backend behavior
 
-- `vcpkg`: `build/.cppx/vcpkg.json` 생성, `vcpkg.cmake` 사용
-- `conan`: `build/.cppx/conanfile.txt` 생성, configure 전에 `conan install` 실행
-- `none`: backend manifest 없음, `cppx add` 비활성화
+- `vcpkg`: generates `build/.cppx/vcpkg.json` and uses `vcpkg.cmake`
+- `conan`: generates `build/.cppx/conanfile.txt` and runs `conan install` before configure
+- `none`: no dependency manifest and `cppx add` is disabled
 
-## preset 동작
+## Presets
 
-- `[[presets]]` 배열을 기준으로 configure/build/test/pack preset을 생성합니다.
-- `runnable = false`인 preset은 `run` 대상에서 제외됩니다.
-- preset이 없으면 기본으로 `debug-<host-arch>`, `release-<host-arch>`를 만듭니다.
+- `[[presets]]` defines the configure/build/test/pack matrix
+- `runnable = false` excludes a preset from `run`
+- when no presets exist, `cppx` creates `debug-<host-arch>` and `release-<host-arch>`
