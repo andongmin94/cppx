@@ -57,6 +57,7 @@ export interface ToolCatalogEntry {
   sha256?: string;
   repoUrl?: string;
   assetPatterns?: string[];
+  trustedRefPatterns?: string[];
   compilerFamily?: CompilerFamily;
 }
 

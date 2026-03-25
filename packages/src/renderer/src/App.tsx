@@ -5,6 +5,7 @@ import type {
   CppxAction,
   CppxApi,
   DependencyBackend,
+  HostDefaultsPayload,
   LogEntry,
   PresetConfigPayload,
   ProjectConfigPayload,
@@ -15,6 +16,10 @@ import type {
   ToolStatusDetail,
   ToolStatus
 } from "@shared/contracts";
+import {
+  getCompilerPreferenceLabel,
+  getCompilerPreferenceOptions
+} from "@shared/compiler-display";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -115,10 +120,6 @@ const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = 
 const toolModeOptions: { value: ToolInstallMode; label: string }[] = [
   { value: "managed", label: "managed" },
   { value: "system", label: "system" }
-];
-const compilerFamilyOptions: { value: CompilerPreference; label: string }[] = [
-  { value: "mingw", label: "MinGW" },
-  { value: "msvc", label: "MSVC" }
 ];
 const toolLabels: Record<EditableToolId, string> = {
   cmake: "CMake",
@@ -413,6 +414,26 @@ function createDefaultToolPolicies(
   };
 }
 
+function cloneToolPolicies(
+  toolPolicies: Required<ProjectToolPoliciesPayload>
+): Required<ProjectToolPoliciesPayload> {
+  return {
+    cmake: { ...toolPolicies.cmake },
+    ninja: { ...toolPolicies.ninja },
+    vcpkg: { ...toolPolicies.vcpkg },
+    cxx: { ...toolPolicies.cxx }
+  };
+}
+
+function createFallbackHostDefaults(): HostDefaultsPayload {
+  return {
+    platform: "win32",
+    defaultPreset: "debug-x64",
+    dependencyBackend: "vcpkg",
+    toolPolicies: createDefaultToolPolicies()
+  };
+}
+
 function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPoliciesPayload> {
   const compilerFamily =
     config.tools?.cxx?.preferredFamily ??
@@ -571,19 +592,24 @@ function getStatusToastClassName(tone: StatusToastTone): string {
 
 export default function App() {
   const cppx = (window as unknown as { cppx?: CppxApi }).cppx;
+  const [hostDefaults, setHostDefaults] = useState<HostDefaultsPayload>(() =>
+    createFallbackHostDefaults()
+  );
   const [defaultRootPath, setDefaultRootPath] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [projectName, setProjectName] = useState("");
   const [dependency, setDependency] = useState("");
   const [projectDependencies, setProjectDependencies] = useState<string[]>([]);
-  const [preset, setPreset] = useState("debug-x64");
-  const [buildPreset, setBuildPreset] = useState("debug-x64");
-  const [dependencyBackend, setDependencyBackend] = useState<DependencyBackend>("vcpkg");
+  const [preset, setPreset] = useState(hostDefaults.defaultPreset);
+  const [buildPreset, setBuildPreset] = useState(hostDefaults.defaultPreset);
+  const [dependencyBackend, setDependencyBackend] = useState<DependencyBackend>(
+    hostDefaults.dependencyBackend
+  );
   const [sourceFile, setSourceFile] = useState("src/main.cpp");
   const [cxxStandardInput, setCxxStandardInput] = useState("20");
   const [targetTriplet, setTargetTriplet] = useState("");
   const [toolPolicies, setToolPolicies] = useState<Required<ProjectToolPoliciesPayload>>(
-    () => createDefaultToolPolicies()
+    () => cloneToolPolicies(hostDefaults.toolPolicies)
   );
   const [presetConfigs, setPresetConfigs] = useState<PresetConfigPayload[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -621,6 +647,18 @@ export default function App() {
     () => viewItems.find((item) => item.id === activeView)?.label ?? "",
     [activeView]
   );
+
+  const compilerFamilyOptions = useMemo(() => {
+    const options = getCompilerPreferenceOptions(hostDefaults.platform);
+    if (
+      hostDefaults.platform !== "win32" &&
+      toolPolicies.cxx.preferredFamily === "msvc" &&
+      !options.some((option) => option.value === "msvc")
+    ) {
+      return [...options, { value: "msvc" as const, label: "MSVC (Windows 전용)" }];
+    }
+    return options;
+  }, [hostDefaults.platform, toolPolicies.cxx.preferredFamily]);
 
   const readyToolCount = useMemo(() => {
     const items = [
@@ -733,10 +771,22 @@ export default function App() {
       .then(setDefaultRootPath)
       .catch(() => setDefaultRootPath(""));
 
-    void cppx.getDefaultWorkspace().then((defaultWorkspace) => {
+    void (async () => {
+      const resolvedHostDefaults = await cppx
+        .getHostDefaults()
+        .catch(() => createFallbackHostDefaults());
+      setHostDefaults({
+        platform: resolvedHostDefaults.platform,
+        defaultPreset: resolvedHostDefaults.defaultPreset,
+        dependencyBackend: resolvedHostDefaults.dependencyBackend,
+        toolPolicies: cloneToolPolicies(resolvedHostDefaults.toolPolicies)
+      });
+      resetProjectEditor(resolvedHostDefaults);
+
+      const defaultWorkspace = await cppx.getDefaultWorkspace();
       setWorkspace(defaultWorkspace);
-      void refreshProjectConfig(cppx, defaultWorkspace);
-    });
+      await refreshProjectConfig(cppx, defaultWorkspace, resolvedHostDefaults);
+    })();
     void refreshToolStatus(cppx);
 
     const unsubscribe = cppx.onLog((entry) => {
@@ -835,16 +885,16 @@ export default function App() {
     }
   }
 
-  function resetProjectEditor(): void {
+  function resetProjectEditor(defaults: HostDefaultsPayload = hostDefaults): void {
     setProjectName("");
     setProjectDependencies([]);
-    setPreset("debug-x64");
-    setBuildPreset("debug-x64");
-    setDependencyBackend("vcpkg");
+    setPreset(defaults.defaultPreset);
+    setBuildPreset(defaults.defaultPreset);
+    setDependencyBackend(defaults.dependencyBackend);
     setSourceFile("src/main.cpp");
     setCxxStandardInput("20");
     setTargetTriplet("");
-    setToolPolicies(createDefaultToolPolicies());
+    setToolPolicies(cloneToolPolicies(defaults.toolPolicies));
     setPresetConfigs([]);
     setCmakeDefinitionsInput("");
     setCmakeOptionsInput("");
@@ -854,11 +904,12 @@ export default function App() {
 
   async function refreshProjectConfig(
     api: CppxApi,
-    workspacePath: string
+    workspacePath: string,
+    defaults: HostDefaultsPayload = hostDefaults
   ): Promise<void> {
     const path = workspacePath.trim();
     if (!path) {
-      resetProjectEditor();
+      resetProjectEditor(defaults);
       return;
     }
 
@@ -866,7 +917,7 @@ export default function App() {
       const config = await api.getProjectConfig(path);
       applyProjectConfig(config);
     } catch {
-      resetProjectEditor();
+      resetProjectEditor(defaults);
     }
   }
 
@@ -1095,10 +1146,12 @@ export default function App() {
         }
       }
 
+      const compilerLabel = getCompilerPreferenceLabel(
+        hostDefaults.platform,
+        compilerPreference ?? toolPolicies.cxx.preferredFamily ?? "mingw"
+      );
       showStatusToast(
-        compilerPreference === "msvc"
-          ? "MSVC 기준으로 도구 설치를 진행합니다."
-          : "MinGW 기준으로 도구 설치를 진행합니다.",
+        `${compilerLabel} 기준으로 도구 설치를 진행합니다.`,
         "info"
       );
     }
@@ -1154,10 +1207,10 @@ export default function App() {
       initialTools.cmake = { percent: 6, status: "running" };
       setInstallProgress({
         status: "running",
-        stage:
-          compilerPreference === "msvc"
-            ? "도구 설치를 시작합니다 (컴파일러: MSVC)"
-            : "도구 설치를 시작합니다 (컴파일러: MinGW)",
+        stage: `도구 설치를 시작합니다 (컴파일러: ${getCompilerPreferenceLabel(
+          hostDefaults.platform,
+          compilerPreference ?? toolPolicies.cxx.preferredFamily ?? "mingw"
+        )})`,
         percent: 4,
         completed: createEmptyInstallCompleted(),
         tools: initialTools
@@ -1530,6 +1583,11 @@ export default function App() {
                                   ))}
                                 </SelectContent>
                               </Select>
+                              {hostDefaults.platform !== "win32" && (
+                                <p className="text-[11px] text-muted-foreground">
+                                  이 호스트에서는 native clang/g++ 계열로 해석됩니다.
+                                </p>
+                              )}
                             </div>
                             <div className="space-y-1.5">
                               <Label className="text-xs" htmlFor="msvc-path">msvc_installation_path</Label>

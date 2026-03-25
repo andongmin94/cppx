@@ -20,6 +20,7 @@ export function registerIpcHandlers(window: BrowserWindow): void {
   ipcMain.removeHandler(IPC_CHANNELS.SELECT_WORKSPACE);
   ipcMain.removeHandler(IPC_CHANNELS.GET_DEFAULT_WORKSPACE);
   ipcMain.removeHandler(IPC_CHANNELS.GET_CPPX_ROOT);
+  ipcMain.removeHandler(IPC_CHANNELS.GET_HOST_DEFAULTS);
   ipcMain.removeHandler(IPC_CHANNELS.GET_COMPILER_SCAN);
   ipcMain.removeHandler(IPC_CHANNELS.GET_TOOL_STATUS);
   ipcMain.removeHandler(IPC_CHANNELS.GET_PROJECT_CONFIG);
@@ -48,6 +49,7 @@ export function registerIpcHandlers(window: BrowserWindow): void {
     resolveDefaultWorkspacePath()
   );
   ipcMain.handle(IPC_CHANNELS.GET_CPPX_ROOT, async () => getCppxRoot());
+  ipcMain.handle(IPC_CHANNELS.GET_HOST_DEFAULTS, async () => service.getHostDefaults());
   ipcMain.handle(IPC_CHANNELS.GET_COMPILER_SCAN, async () => getCompilerScan());
   ipcMain.handle(IPC_CHANNELS.GET_TOOL_STATUS, async () => service.toolStatus());
   ipcMain.handle(IPC_CHANNELS.GET_PROJECT_CONFIG, async (_event, workspace: string) =>

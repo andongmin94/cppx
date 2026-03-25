@@ -1,0 +1,32 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { CppxService } from "../src/main/cppx/service";
+import { getHostAdapter } from "../src/main/cppx/platform";
+import { getDefaultPresetName } from "../src/main/cppx/config";
+
+test("service host defaults follow the active host adapter policy", async () => {
+  const service = new CppxService(() => {});
+  const hostAdapter = getHostAdapter();
+  const defaults = await service.getHostDefaults();
+
+  assert.equal(defaults.platform, hostAdapter.platform);
+  assert.equal(defaults.defaultPreset, getDefaultPresetName());
+  assert.equal(defaults.dependencyBackend, hostAdapter.getDefaultDependencyBackend());
+  assert.equal(
+    defaults.toolPolicies.cmake.mode,
+    hostAdapter.getDefaultToolMode("cmake", hostAdapter.compilerFamily)
+  );
+  assert.equal(
+    defaults.toolPolicies.ninja.mode,
+    hostAdapter.getDefaultToolMode("ninja", hostAdapter.compilerFamily)
+  );
+  assert.equal(
+    defaults.toolPolicies.vcpkg.mode,
+    hostAdapter.getDefaultToolMode("vcpkg", hostAdapter.compilerFamily)
+  );
+  assert.equal(
+    defaults.toolPolicies.cxx.mode,
+    hostAdapter.getDefaultToolMode("cxx", hostAdapter.compilerFamily)
+  );
+  assert.equal(defaults.toolPolicies.cxx.preferredFamily, hostAdapter.compilerFamily);
+});

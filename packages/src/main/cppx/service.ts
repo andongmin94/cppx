@@ -1,6 +1,7 @@
 ﻿import path from "node:path";
 import type {
   DependencyBackend,
+  HostDefaultsPayload,
   ProjectConfigPayload,
   ProjectToolPoliciesPayload,
   RunCommandPayload,
@@ -11,7 +12,7 @@ import { CppxError } from "./errors";
 import { getToolStatus, installAllTools, resolveToolchainOrThrow } from "./installers";
 import { CppxLogger, type LogSink } from "./logger";
 import { getHostAdapter } from "./platform";
-import { getDefaultPresetName } from "./config";
+import { defaultProjectConfig, getDefaultPresetName } from "./config";
 import {
   addDependency,
   buildWithPreset,
@@ -274,6 +275,22 @@ export class CppxService {
 
   async toolStatus(): Promise<ToolStatus> {
     return getToolStatus();
+  }
+
+  async getHostDefaults(): Promise<HostDefaultsPayload> {
+    const config = defaultProjectConfig("cppx-app", hostAdapter.compilerFamily);
+
+    return {
+      platform: hostAdapter.platform,
+      defaultPreset: config.defaultPreset,
+      dependencyBackend: config.dependencyBackend,
+      toolPolicies: {
+        cmake: { ...config.tools.cmake },
+        ninja: { ...config.tools.ninja },
+        vcpkg: { ...config.tools.vcpkg },
+        cxx: { ...config.tools.cxx }
+      }
+    };
   }
 
   async getProjectConfig(workspaceRaw: string): Promise<ProjectConfigPayload> {

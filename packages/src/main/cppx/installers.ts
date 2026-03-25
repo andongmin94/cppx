@@ -29,11 +29,14 @@ import {
 } from "./paths";
 import {
   DEFAULT_TOOL_VERSION_TOKEN,
+  LATEST_TOOL_VERSION_TOKEN,
+  isTrustedCatalogGitRef,
   resolveToolCatalogEntry
 } from "./tool-catalog";
 import type {
   CompilerFamily,
   CompilerToolPolicy,
+  ToolCatalogEntry,
   ToolName,
   ToolPolicy,
   ToolRecord,
@@ -216,6 +219,97 @@ function getHostArchLabel(): string {
 
 function getDefaultToolMode(tool: ToolName, compilerFamily: CompilerFamily): "managed" | "system" {
   return hostAdapter.getDefaultToolMode(tool, compilerFamily);
+}
+
+function normalizeGitRemoteUrl(value: string): string {
+  return value.trim().replace(/\.git$/i, "").toLowerCase();
+}
+
+async function getGitOriginUrl(repositoryRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile("git", ["remote", "get-url", "origin"], {
+      cwd: repositoryRoot,
+      windowsHide: true
+    });
+    const normalized = stdout.trim();
+    return normalized.length > 0 ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyGitOriginOrThrow(
+  tool: ToolName,
+  repositoryRoot: string,
+  expectedRepoUrl: string
+): Promise<void> {
+  const originUrl = await getGitOriginUrl(repositoryRoot);
+  if (!originUrl) {
+    throw new CppxError(`${tool} git origin 정보를 찾지 못했습니다.`, repositoryRoot);
+  }
+
+  if (normalizeGitRemoteUrl(originUrl) !== normalizeGitRemoteUrl(expectedRepoUrl)) {
+    throw new CppxError(
+      `${tool} git origin이 catalog와 일치하지 않습니다.`,
+      `expected=${expectedRepoUrl}, actual=${originUrl}`
+    );
+  }
+}
+
+function resolveDesiredCatalogGitRef(entry: ToolCatalogEntry, requestedVersion: string): string | null {
+  const normalizedVersion =
+    requestedVersion.trim().length > 0 ? requestedVersion.trim() : DEFAULT_TOOL_VERSION_TOKEN;
+
+  if (normalizedVersion === LATEST_TOOL_VERSION_TOKEN) {
+    return null;
+  }
+
+  if (normalizedVersion === DEFAULT_TOOL_VERSION_TOKEN) {
+    return entry.version && entry.version !== "rolling" ? entry.version : null;
+  }
+
+  if (!isTrustedCatalogGitRef(entry, normalizedVersion)) {
+    throw new CppxError(
+      `${entry.tool} exact version은 신뢰된 tag 또는 commit ref만 지원합니다.`,
+      `requested=${normalizedVersion}`
+    );
+  }
+
+  return normalizedVersion;
+}
+
+async function getGitRevisionMetadata(repositoryRoot: string): Promise<{
+  shortCommit: string;
+  fullCommit: string;
+  exactTag: string | null;
+}> {
+  const [{ stdout: shortStdout }, { stdout: fullStdout }] = await Promise.all([
+    execFile("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: repositoryRoot,
+      windowsHide: true
+    }),
+    execFile("git", ["rev-parse", "HEAD"], {
+      cwd: repositoryRoot,
+      windowsHide: true
+    })
+  ]);
+
+  let exactTag: string | null = null;
+  try {
+    const { stdout } = await execFile("git", ["describe", "--tags", "--exact-match", "HEAD"], {
+      cwd: repositoryRoot,
+      windowsHide: true
+    });
+    exactTag = stdout.trim() || null;
+  } catch {
+    exactTag = null;
+  }
+
+  return {
+    shortCommit: shortStdout.trim(),
+    fullCommit: fullStdout.trim(),
+    exactTag
+  };
 }
 
 function getDefaultToolVersion(
@@ -1094,6 +1188,8 @@ async function installVcpkg(
   const entry = resolveToolCatalogEntry(tool, policy.version);
   const toolRoot = getToolRoot(tool);
   const vcpkgExe = path.join(toolRoot, hostAdapter.getExecutableName("vcpkg"));
+  const expectedRepoUrl = entry.repoUrl ?? "https://github.com/microsoft/vcpkg.git";
+  const desiredRef = resolveDesiredCatalogGitRef(entry, policy.version);
 
   await ensureDir(path.dirname(toolRoot));
 
@@ -1119,49 +1215,43 @@ async function installVcpkg(
             "clone",
             "--depth",
             "1",
-            entry.repoUrl ?? "https://github.com/microsoft/vcpkg.git",
+            "--no-checkout",
+            expectedRepoUrl,
             toolRoot
           ]
         },
         logger
       );
     }
-  } else {
-    await runSpawn(
-      {
-        action: "install-tools",
-        command: "git",
-        args: ["pull", "--ff-only"],
-        cwd: toolRoot
-      },
-      logger
-    );
   }
 
-  if (
-    policy.version !== DEFAULT_TOOL_VERSION_TOKEN &&
-    policy.version !== "latest" &&
-    policy.version.trim().length > 0
-  ) {
-    await runSpawn(
-      {
-        action: "install-tools",
-        command: "git",
-        args: ["fetch", "--depth", "1", "origin", policy.version],
-        cwd: toolRoot
-      },
-      logger
-    );
-    await runSpawn(
-      {
-        action: "install-tools",
-        command: "git",
-        args: ["checkout", "--force", "FETCH_HEAD"],
-        cwd: toolRoot
-      },
-      logger
-    );
-  }
+  await verifyGitOriginOrThrow(tool, toolRoot, expectedRepoUrl);
+  logger.info(
+    "install-tools",
+    desiredRef
+      ? `vcpkg 신뢰된 ref 사용: ${desiredRef}`
+      : "vcpkg latest HEAD를 사용합니다."
+  );
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: "git",
+      args: desiredRef
+        ? ["fetch", "--depth", "1", "origin", desiredRef]
+        : ["fetch", "--depth", "1", "origin"],
+      cwd: toolRoot
+    },
+    logger
+  );
+  await runSpawn(
+    {
+      action: "install-tools",
+      command: "git",
+      args: ["checkout", "--force", "FETCH_HEAD"],
+      cwd: toolRoot
+    },
+    logger
+  );
 
   await fs.rm(vcpkgExe, { force: true });
   const bootstrapCommand = hostAdapter.getVcpkgBootstrapCommand(toolRoot);
@@ -1183,11 +1273,13 @@ async function installVcpkg(
 
   let resolvedVersion = entry.version ?? policy.version;
   try {
-    const { stdout } = await execFile("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: toolRoot,
-      windowsHide: true
-    });
-    resolvedVersion = stdout.trim() || resolvedVersion;
+    const revision = await getGitRevisionMetadata(toolRoot);
+    const taggedVersion =
+      revision.exactTag ??
+      (desiredRef && !/^[0-9a-f]{7,40}$/i.test(desiredRef) ? desiredRef : null);
+    resolvedVersion = taggedVersion
+      ? `${taggedVersion}@${revision.shortCommit}`
+      : revision.shortCommit || resolvedVersion;
   } catch {
     // Keep the policy version when git metadata is unavailable.
   }
@@ -1204,7 +1296,7 @@ async function installVcpkg(
     catalogId: entry.id
   };
   await registerTool(record);
-  logger.success("install-tools", `vcpkg 설치됨: ${vcpkgExe}`);
+  logger.success("install-tools", `vcpkg 설치됨: ${vcpkgExe} (${resolvedVersion})`);
   return record;
 }
 

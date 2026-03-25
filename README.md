@@ -153,10 +153,13 @@ GUI에서는 **CMake 설정 카드**의 `config 불러오기` / `config 저장` 
 
 `init`은 `--backend <vcpkg|conan|none>`를 지원하므로 처음부터 의존성 방식을 명시할 수 있습니다.
 `install-tools`는 `--compiler <mingw|msvc>`와 `--msvc-installation-path <path>`를 지원합니다.
+관리형 `vcpkg`의 `default`는 catalog가 고정한 release tag를 사용하고, `latest`만 현재 원격 HEAD를 따라갑니다. exact 버전은 신뢰된 release tag 또는 commit ref만 허용합니다.
 `status [workspace]`는 가능한 경우 `managed/system`, 해석된 버전, 소스 종류, 검증된 SHA-256 일부, 실행 파일 경로와 workspace 힌트를 함께 표시합니다.
 `doctor [workspace]`는 blocker와 warning을 구분해서 보여 주고, 특히 `dependency_backend = "none"`에서 왜 `cppx add`가 비활성화되는지 설명합니다.
 
-GitHub Actions에는 `Native CI`와 별도 `Release Artifacts` workflow가 포함되어 있습니다. 태그나 수동 실행으로 OS별 빌드 산출물을 만들 수 있습니다.
+GitHub Actions에는 `Native CI`와 별도 `Desktop Packages` workflow가 포함되어 있습니다. 브랜치 푸시나 태그, 수동 실행으로 OS별 데스크톱 패키지를 만들 수 있습니다.
+
+현재 이 workflow는 `electron-builder`로 실제 실행 가능한 앱 패키지를 만듭니다. 다만 서명된 설치 파일이나 notarization까지 포함한 배포 파이프라인은 아직 별도 범위입니다.
 
 ## 마이그레이션 요약
 

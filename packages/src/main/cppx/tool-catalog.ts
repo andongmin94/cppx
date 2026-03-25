@@ -6,6 +6,10 @@ export const DEFAULT_TOOL_VERSION_TOKEN = "default";
 export const LATEST_TOOL_VERSION_TOKEN = "latest";
 
 const hostAdapter = getHostAdapter();
+const TRUSTED_VCPKG_REF_PATTERNS = [
+  "^\\d{4}\\.\\d{2}\\.\\d{2}(?:\\.\\d+)?$",
+  "^[0-9a-fA-F]{7,40}$"
+];
 
 const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
   {
@@ -34,14 +38,15 @@ const WINDOWS_TOOL_CATALOG: ToolCatalogEntry[] = [
     urls: ["https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip"]
   },
   {
-    id: "vcpkg-rolling-windows-x64",
+    id: "vcpkg-2026.03.18-windows-x64",
     tool: "vcpkg",
     platform: "win32",
     arch: "x64",
     sourceKind: "catalog-git",
     executable: hostAdapter.getExecutableName("vcpkg"),
-    version: "rolling",
-    repoUrl: "https://github.com/microsoft/vcpkg.git"
+    version: "2026.03.18",
+    repoUrl: "https://github.com/microsoft/vcpkg.git",
+    trustedRefPatterns: TRUSTED_VCPKG_REF_PATTERNS
   },
   {
     id: "llvm-mingw-latest-windows-x64",
@@ -92,6 +97,24 @@ export function getToolCatalogEntries(
     .sort((left, right) => compareVersionDesc(left.version, right.version));
 }
 
+export function isTrustedCatalogGitRef(entry: ToolCatalogEntry, ref: string): boolean {
+  if (entry.sourceKind !== "catalog-git") {
+    return false;
+  }
+
+  const normalizedRef = ref.trim();
+  if (normalizedRef.length === 0) {
+    return false;
+  }
+
+  const patterns = entry.trustedRefPatterns ?? [];
+  if (patterns.length === 0) {
+    return true;
+  }
+
+  return patterns.some((pattern) => new RegExp(pattern).test(normalizedRef));
+}
+
 export function resolveToolCatalogEntry(
   tool: ToolName,
   version: string,
@@ -117,7 +140,21 @@ export function resolveToolCatalogEntry(
     return exact;
   }
 
-  if (tool === "vcpkg" || tool === "cxx") {
+  if (tool === "vcpkg") {
+    if (!isTrustedCatalogGitRef(fallback, normalizedVersion)) {
+      throw new CppxError(
+        "vcpkg exact version은 신뢰된 tag 또는 commit ref만 지원합니다.",
+        `requested=${normalizedVersion}`
+      );
+    }
+
+    return {
+      ...fallback,
+      version: normalizedVersion
+    };
+  }
+
+  if (tool === "cxx") {
     return {
       ...fallback,
       version: normalizedVersion

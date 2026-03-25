@@ -9,6 +9,7 @@ import type {
   RunCommandResult,
   ToolStatusDetail
 } from "@shared/contracts";
+import { formatCompilerPreference } from "@shared/compiler-display";
 import { CPPX_CONFIG_PATH, parseConfigToml } from "./cppx/config";
 import { runDoctor } from "./cppx/doctor";
 import { pathExists } from "./cppx/fs-utils";
@@ -128,7 +129,9 @@ function printDoctorReport(report: Awaited<ReturnType<typeof runDoctor>>): void 
   console.log(`host: ${report.host.platform}/${report.host.arch}`);
   console.log(`default backend: ${report.host.defaultBackend}`);
   console.log(`active backend: ${report.activeBackend}`);
-  console.log(`compiler family: ${report.host.compilerFamily}`);
+  console.log(
+    `compiler family: ${formatCompilerPreference(report.host.platform, report.host.compilerFamily)}`
+  );
   console.log(`workspace: ${report.workspace}`);
   console.log("");
 
@@ -165,7 +168,7 @@ program
   .description(
     "Resolve or install CMake, Ninja, vcpkg, and C++ compiler according to host policy"
   )
-  .option("--compiler <compiler>", "Compiler family (mingw or msvc)")
+  .option("--compiler <compiler>", "Compiler family (Windows only: mingw or msvc)")
   .option("--msvc-installation-path <path>", "Preferred MSVC installation path")
   .action(async (options: { compiler?: "mingw" | "msvc"; msvcInstallationPath?: string }) => {
     await execute({

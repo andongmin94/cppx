@@ -1,8 +1,11 @@
-name: Release Artifacts
+name: Desktop Packages
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - codex/**
     tags:
       - v*
 
@@ -10,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  build-release:
+  build-packages:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -31,24 +34,6 @@ jobs:
           cache: npm
           cache-dependency-path: packages/package-lock.json
 
-      - name: Install Linux prerequisites
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential zip
-
-      - name: Install macOS prerequisites
-        if: runner.os == 'macOS'
-        run: brew install cmake ninja
-
-      - name: Install Windows prerequisites
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install cmake ninja -y
-          "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Install dependencies
         run: npm ci
 
@@ -58,47 +43,32 @@ jobs:
       - name: Test
         run: npm run test:ci
 
-      - name: Build app
-        run: npm run build
+      - name: Build desktop packages
+        run: npm run dist
 
-      - name: Package release archive (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE "release-artifacts"
-          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
-          $zipPath = Join-Path $artifactRoot "cppx-${{ matrix.os }}.zip"
-          if (Test-Path $zipPath) {
-            Remove-Item $zipPath -Force
-          }
-          Compress-Archive -Path out\* -DestinationPath $zipPath
-
-      - name: Package release archive (POSIX)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/release-artifacts"
-          cd out
-          zip -rq "$GITHUB_WORKSPACE/release-artifacts/cppx-${{ matrix.os }}.zip" .
-
-      - name: Upload release artifact
+      - name: Upload desktop packages
         uses: actions/upload-artifact@v6
         with:
-          name: cppx-release-${{ matrix.os }}
-          path: release-artifacts/cppx-${{ matrix.os }}.zip
+          name: cppx-package-${{ matrix.os }}
+          path: |
+            packages/dist/*.zip
+            packages/dist/*.tar.gz
           if-no-files-found: error
           retention-days: 14
 
   publish-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-release
+    needs: build-packages
     runs-on: ubuntu-latest
     steps:
-      - name: Download build artifacts
+      - name: Download desktop packages
         uses: actions/download-artifact@v7
         with:
           path: release-artifacts
 
-      - name: Publish GitHub release
+      - name: Publish GitHub release with desktop packages
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/**/*.zip
+          files: |
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.tar.gz

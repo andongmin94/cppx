@@ -11,6 +11,7 @@ export type CompilerPreference = "mingw" | "msvc";
 export type ToolInstallMode = "managed" | "system";
 export type DependencyBackend = "vcpkg" | "conan" | "none";
 export type ToolId = "cmake" | "ninja" | "vcpkg" | "cxx";
+export type HostPlatformPayload = "win32" | "darwin" | "linux";
 
 export type LogLevel =
   | "info"
@@ -92,6 +93,13 @@ export interface ProjectConfigPayload {
   presets?: PresetConfigPayload[];
 }
 
+export interface HostDefaultsPayload {
+  platform: HostPlatformPayload;
+  defaultPreset: string;
+  dependencyBackend: DependencyBackend;
+  toolPolicies: Required<ProjectToolPoliciesPayload>;
+}
+
 export interface RunCommandPayload {
   action: CppxAction;
   workspace: string;
@@ -150,6 +158,7 @@ export interface CppxApi {
   selectWorkspace: () => Promise<string | null>;
   getDefaultWorkspace: () => Promise<string>;
   getCppxRoot: () => Promise<string>;
+  getHostDefaults: () => Promise<HostDefaultsPayload>;
   getCompilerScan: () => Promise<CompilerScanResult>;
   getToolStatus: () => Promise<ToolStatus>;
   getProjectConfig: (workspace: string) => Promise<ProjectConfigPayload>;

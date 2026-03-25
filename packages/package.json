@@ -22,6 +22,8 @@
   "scripts": {
     "dev": "node ./scripts/run-electron-vite.mjs dev",
     "build": "electron-vite build",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never",
     "preview": "node ./scripts/run-electron-vite.mjs preview",
     "typecheck": "tsc --noEmit",
     "test": "node ./scripts/run-tests.mjs",
@@ -59,6 +61,7 @@
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
     "autoprefixer": "^10.4.21",
+    "electron-builder": "^26.0.12",
     "electron": "^37.3.1",
     "electron-vite": "^4.0.0",
     "postcss": "^8.5.6",
@@ -66,5 +69,36 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vite": "^7.1.7"
+  },
+  "build": {
+    "appId": "com.andongmin.cppx",
+    "productName": "cppx",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "public"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "artifactName": "cppx-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "tar.gz"
+      ],
+      "category": "Development"
+    }
   }
 }
