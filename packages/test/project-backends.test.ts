@@ -77,9 +77,18 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
 
       const tasks = await readJson<any>(path.join(workspace, ".vscode", "tasks.json"));
       const labels = tasks.tasks.map((task: any) => task.label);
+      const conanProfile = tasks.tasks.find((task: any) => task.label === "cppx: conan profile");
       const configureAsan = tasks.tasks.find((task: any) => task.label === "cppx: configure asan-x64");
-      assert.deepEqual(labels.slice(0, 2), ["cppx: deps conan", "cppx: configure asan-x64"]);
-      assert.equal(configureAsan.dependsOn, "cppx: deps conan");
+      assert.deepEqual(labels.slice(0, 3), [
+        "cppx: conan profile",
+        "cppx: deps conan",
+        "cppx: configure asan-x64"
+      ]);
+      assert.equal(conanProfile.command, "conan profile detect --force");
+      assert.deepEqual(configureAsan.dependsOn, [
+        "cppx: conan profile",
+        "cppx: deps conan"
+      ]);
       assert.match(JSON.stringify(tasks), /build release-lto/);
       assert.match(JSON.stringify(tasks), /run asan-x64/);
       assert.doesNotMatch(JSON.stringify(tasks), /run release-lto/);

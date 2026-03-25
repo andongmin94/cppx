@@ -164,8 +164,15 @@ const conanBackend: DependencyBackendAdapter = {
 
   getVSCodeIntegration() {
     return {
-      configureDependsOn: ["cppx: deps conan"],
+      configureDependsOn: ["cppx: conan profile", "cppx: deps conan"],
       tasks: [
+        {
+          label: "cppx: conan profile",
+          type: "shell",
+          command: "conan profile detect --force",
+          options: { cwd: VSCODE_GENERATED_ROOT },
+          group: "build"
+        },
         {
           label: "cppx: deps conan",
           type: "shell",
@@ -178,6 +185,15 @@ const conanBackend: DependencyBackendAdapter = {
   },
 
   async prepareForConfigure(_config, _toolchain, generatedRoot, logger) {
+    await runSpawn(
+      {
+        action: "build",
+        command: "conan",
+        args: ["profile", "detect", "--force"],
+        cwd: generatedRoot
+      },
+      logger
+    );
     await runSpawn(
       {
         action: "build",

@@ -822,6 +822,11 @@ async function registerTool(record: ResolvedToolInfo): Promise<void> {
 }
 
 async function resolveExecutableFromPath(candidates: string[]): Promise<string | null> {
+  const directPathMatch = await resolveExecutableFromPathEntries(candidates);
+  if (directPathMatch) {
+    return directPathMatch;
+  }
+
   for (const candidate of candidates) {
     try {
       const lookupCommand = hostAdapter.getExecutableLookupCommand(candidate);
@@ -837,6 +842,40 @@ async function resolveExecutableFromPath(candidates: string[]): Promise<string |
       }
     } catch {
       // Ignore missing candidates and continue.
+    }
+  }
+
+  return null;
+}
+
+async function resolveExecutableFromPathEntries(candidates: string[]): Promise<string | null> {
+  const pathValue = process.env.PATH;
+  if (!pathValue) {
+    return null;
+  }
+
+  const pathEntries = pathValue
+    .split(hostAdapter.getPathSeparator())
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  for (const candidate of candidates) {
+    for (const entry of pathEntries) {
+      const resolved = path.join(entry, candidate);
+      if (!(await pathExists(resolved))) {
+        continue;
+      }
+
+      const stat = await fs.stat(resolved).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        continue;
+      }
+
+      if (hostAdapter.platform !== "win32" && (stat.mode & 0o111) === 0) {
+        continue;
+      }
+
+      return resolved;
     }
   }
 
@@ -1674,6 +1713,21 @@ function buildResolvedExecutable(
   };
 }
 
+function getMatchingSystemRecord(
+  record: ToolRecord | undefined,
+  executable: string
+): ToolRecord | undefined {
+  if (!record || (record.mode ?? "managed") !== "system") {
+    return undefined;
+  }
+
+  if (typeof record.executable !== "string" || record.executable.trim().length === 0) {
+    return undefined;
+  }
+
+  return hostAdapter.comparePaths(record.executable, executable) === 0 ? record : undefined;
+}
+
 function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
   if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
     return "homebrew-managed";
@@ -1753,6 +1807,53 @@ async function resolveSystemToolExecutable(
   policy?: ToolPolicy | CompilerToolPolicy
 ): Promise<ResolvedToolExecutable | null> {
   const record = manifest.tools[tool];
+  if (tool === "cxx") {
+    const compiler = await resolveSystemCompiler(
+      (policy as CompilerToolPolicy | undefined) ?? resolveRequestedPolicies().cxx
+    );
+    if (compiler) {
+      return buildResolvedExecutable(
+        compiler.executable,
+        compiler.root,
+        getMatchingSystemRecord(record, compiler.executable),
+        compiler
+      );
+    }
+
+    if (
+      record &&
+      (record.mode ?? "managed") === "system" &&
+      typeof record.executable === "string" &&
+      record.executable.trim().length > 0 &&
+      (await pathExists(record.executable))
+    ) {
+      return buildResolvedExecutable(record.executable, record.root, record, {
+        mode: "system",
+        sourceKind: record.sourceKind ?? "system-detected",
+        requestedVersion: policy?.version,
+        resolvedVersion: record.resolvedVersion ?? record.version,
+        compilerFamily: record.compilerFamily,
+        provider: record.provider,
+        ownership: record.ownership
+      });
+    }
+
+    return null;
+  }
+
+  const systemTool = await resolveSystemTool(
+    tool,
+    (policy as ToolPolicy | undefined) ?? { mode: "system", version: DEFAULT_TOOL_VERSION_TOKEN }
+  );
+  if (systemTool) {
+    return buildResolvedExecutable(
+      systemTool.executable,
+      systemTool.root,
+      getMatchingSystemRecord(record, systemTool.executable),
+      systemTool
+    );
+  }
+
   if (
     record &&
     (record.mode ?? "managed") === "system" &&
@@ -1762,31 +1863,16 @@ async function resolveSystemToolExecutable(
   ) {
     return buildResolvedExecutable(record.executable, record.root, record, {
       mode: "system",
-      sourceKind: tool === "cxx" ? "msvc-detected" : "system-detected",
+      sourceKind: record.sourceKind ?? "system-detected",
       requestedVersion: policy?.version,
-      resolvedVersion: record.version,
-      compilerFamily: record.compilerFamily
+      resolvedVersion: record.resolvedVersion ?? record.version,
+      compilerFamily: record.compilerFamily,
+      provider: record.provider,
+      ownership: record.ownership
     });
   }
 
-  if (tool === "cxx") {
-    const compiler = await resolveSystemCompiler(
-      (policy as CompilerToolPolicy | undefined) ?? resolveRequestedPolicies().cxx
-    );
-    if (!compiler) {
-      return null;
-    }
-    return buildResolvedExecutable(compiler.executable, compiler.root, undefined, compiler);
-  }
-
-  const systemTool = await resolveSystemTool(
-    tool,
-    (policy as ToolPolicy | undefined) ?? { mode: "system", version: DEFAULT_TOOL_VERSION_TOKEN }
-  );
-  if (!systemTool) {
-    return null;
-  }
-  return buildResolvedExecutable(systemTool.executable, systemTool.root, undefined, systemTool);
+  return null;
 }
 
 async function resolveToolExecutable(

@@ -145,6 +145,7 @@ test("installAllTools fails clearly when managed lifecycle is not supported on t
 });
 
 test("resolveToolchainOrThrow honors explicit system tool policies via PATH", async () => {
+  const hostRoot = await createTempDir("system-policy-root");
   const toolPath = await createTempDir("system-tools");
   const { logger } = createLogger();
   const hostAdapter = getHostAdapter();
@@ -163,40 +164,60 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
       await writeExecutable(vcpkg);
     }
 
-    await withEnv(
-      "PATH",
-      `${toolPath}${hostAdapter.getPathSeparator()}${process.env.PATH ?? ""}`,
-      async () => {
-        const toolchain = await resolveToolchainOrThrow(
-          logger,
-          {
-            cmake: { mode: "system", version: "latest" },
-            ninja: { mode: "system", version: "latest" },
-            vcpkg: { mode: "system", version: "latest" },
-            cxx: { mode: "system", version: "latest", preferredFamily: "mingw" }
-          },
-          dependencyBackend
-        );
-
-        assertUsesToolDir(toolchain.cmake, toolPath, hostAdapter.getExecutableName("cmake"));
-        assertUsesToolDir(toolchain.ninja, toolPath, hostAdapter.getExecutableName("ninja"));
-        if (dependencyBackend === "vcpkg") {
-          const vcpkgExecutable = toolchain.vcpkg;
-          assert.ok(vcpkgExecutable);
-          assertUsesToolDir(vcpkgExecutable, toolPath, hostAdapter.getExecutableName("vcpkg"));
-        } else {
-          assert.equal(toolchain.vcpkg, undefined);
-        }
-        assertUsesToolDir(toolchain.cxx, toolPath, hostAdapter.getExecutableName("clang++"));
-        assert.equal(toolchain.compilerFamily, "mingw");
-        assert.equal(toolchain.envPath.length, 1);
-        assert.equal(
-          path.basename(toolchain.envPath[0]).toLowerCase(),
-          path.basename(toolPath).toLowerCase()
-        );
+    await withHostDataRoot(hostRoot, async () => {
+      if (process.platform === "win32") {
+        const staleCompiler = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("cl"));
+        await writeExecutable(staleCompiler);
+        await upsertToolRecord({
+          name: "cxx",
+          executable: staleCompiler,
+          root: getToolRoot("cxx"),
+          version: "system",
+          installedAt: "2026-03-25T00:00:00.000Z",
+          mode: "system",
+          sourceKind: "msvc-detected",
+          compilerFamily: "msvc",
+          provider: "msvc",
+          ownership: "external"
+        });
       }
-    );
+
+      await withEnv(
+        "PATH",
+        `${toolPath}${hostAdapter.getPathSeparator()}${process.env.PATH ?? ""}`,
+        async () => {
+          const toolchain = await resolveToolchainOrThrow(
+            logger,
+            {
+              cmake: { mode: "system", version: "latest" },
+              ninja: { mode: "system", version: "latest" },
+              vcpkg: { mode: "system", version: "latest" },
+              cxx: { mode: "system", version: "latest", preferredFamily: "mingw" }
+            },
+            dependencyBackend
+          );
+
+          assertUsesToolDir(toolchain.cmake, toolPath, hostAdapter.getExecutableName("cmake"));
+          assertUsesToolDir(toolchain.ninja, toolPath, hostAdapter.getExecutableName("ninja"));
+          if (dependencyBackend === "vcpkg") {
+            const vcpkgExecutable = toolchain.vcpkg;
+            assert.ok(vcpkgExecutable);
+            assertUsesToolDir(vcpkgExecutable, toolPath, hostAdapter.getExecutableName("vcpkg"));
+          } else {
+            assert.equal(toolchain.vcpkg, undefined);
+          }
+          assertUsesToolDir(toolchain.cxx, toolPath, hostAdapter.getExecutableName("clang++"));
+          assert.equal(toolchain.compilerFamily, "mingw");
+          assert.equal(toolchain.envPath.length, 1);
+          assert.equal(
+            path.basename(toolchain.envPath[0]).toLowerCase(),
+            path.basename(toolPath).toLowerCase()
+          );
+        }
+      );
+    });
   } finally {
+    await removeDir(hostRoot);
     await removeDir(toolPath);
   }
 });
