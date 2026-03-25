@@ -9,9 +9,6 @@ on:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build-release:
     runs-on: ${{ matrix.os }}
@@ -26,9 +23,9 @@ jobs:
       run:
         working-directory: packages
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -84,7 +81,7 @@ jobs:
           zip -rq "$GITHUB_WORKSPACE/release-artifacts/cppx-${{ matrix.os }}.zip" .
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cppx-release-${{ matrix.os }}
           path: release-artifacts/cppx-${{ matrix.os }}.zip
@@ -97,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-artifacts
 
