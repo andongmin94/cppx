@@ -39,7 +39,8 @@ test("service host defaults follow the active host adapter policy", async () => 
   if (hostAdapter.platform === "win32") {
     assert.equal(defaults.hostSupport.managedLifecycleReady, true);
     assert.equal(defaults.toolCapabilities.cmake.install, true);
-    assert.equal(defaults.toolCapabilities.conan.install, false);
+    assert.equal(defaults.toolCapabilities.conan.provider, "archive");
+    assert.equal(defaults.toolCapabilities.conan.install, true);
   } else if (
     hostAdapter.platform === "linux" &&
     defaults.hostSupport.recommendedProvider === "apt"

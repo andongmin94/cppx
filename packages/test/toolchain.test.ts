@@ -109,6 +109,110 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
   }
 });
 
+test("getToolStatus and resolveToolchainOrThrow surface archive-managed conan on Windows", async () => {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const localAppData = await createTempDir("tool-status-conan");
+  const hostAdapter = getHostAdapter();
+  const { logger } = createLogger();
+
+  try {
+    await withHostDataRoot(localAppData, async () => {
+      const cmake = path.join(getToolRoot("cmake"), "bin", hostAdapter.getExecutableName("cmake"));
+      const ninja = path.join(getToolRoot("ninja"), hostAdapter.getExecutableName("ninja"));
+      const conan = path.join(getToolRoot("conan"), hostAdapter.getExecutableName("conan"));
+      const cxx = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("clang++"));
+
+      await writeExecutable(cmake);
+      await writeExecutable(ninja);
+      await writeExecutable(conan);
+      await writeExecutable(cxx);
+
+      await upsertToolRecord({
+        name: "cmake",
+        executable: cmake,
+        root: getToolRoot("cmake"),
+        version: "3.30.5",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-archive",
+        provider: "archive",
+        ownership: "cppx"
+      });
+      await upsertToolRecord({
+        name: "ninja",
+        executable: ninja,
+        root: getToolRoot("ninja"),
+        version: "1.12.1",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-archive",
+        provider: "archive",
+        ownership: "cppx"
+      });
+      await upsertToolRecord({
+        name: "conan",
+        executable: conan,
+        root: getToolRoot("conan"),
+        version: "2.27.0",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-github-release",
+        provider: "archive",
+        ownership: "cppx",
+        catalogId: "conan-latest-windows-x64",
+        verifiedSha256: "9ec5eb2351c187cebcf674c46246e29d09fca4a6f87284a3d3d08b03e4d3fc44"
+      });
+      await upsertToolRecord({
+        name: "cxx",
+        executable: cxx,
+        root: getToolRoot("cxx"),
+        version: "llvm-mingw",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-github-release",
+        provider: "archive",
+        ownership: "cppx",
+        compilerFamily: "mingw"
+      });
+
+      const status = await getToolStatus();
+      assert.equal(status.conan, true);
+      assert.equal(status.details?.conan?.provider, "archive");
+      assert.equal(status.details?.conan?.sourceKind, "catalog-github-release");
+      assert.equal(status.details?.conan?.ownership, "cppx");
+      assert.equal(status.details?.conan?.capabilities?.provider, "archive");
+      assert.equal(status.details?.conan?.capabilities?.install, true);
+
+      const toolchain = await resolveToolchainOrThrow(
+        logger,
+        {
+          cmake: { mode: "managed", version: "default" },
+          ninja: { mode: "managed", version: "default" },
+          conan: { mode: "managed", version: "default" },
+          cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+        },
+        "conan"
+      );
+
+      assert.equal(toolchain.cmake, cmake);
+      assert.equal(toolchain.ninja, ninja);
+      assert.equal(toolchain.vcpkg, undefined);
+      assert.equal(toolchain.cxx, cxx);
+      assert.deepEqual(toolchain.envPath, [
+        path.dirname(cmake),
+        path.dirname(ninja),
+        path.dirname(conan),
+        path.dirname(cxx)
+      ]);
+    });
+  } finally {
+    await removeDir(localAppData);
+  }
+});
+
 test("installAllTools fails clearly when managed lifecycle is not supported on unsupported Linux hosts", async () => {
   if (process.platform !== "linux") {
     return;
@@ -131,7 +235,7 @@ test("installAllTools fails clearly when managed lifecycle is not supported on u
                   cmake: { mode: "managed", version: "default" },
                   ninja: { mode: "managed", version: "default" },
                   vcpkg: { mode: "managed", version: "default" },
-                  cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+                  cxx: { mode: "managed", version: "latest", preferredFamily: "clang" }
                 },
                 "none"
               ),
@@ -234,7 +338,7 @@ test("getToolStatus and resolveToolchainOrThrow surface pipx-managed conan on su
               cmake: { mode: "managed", version: "default" },
               ninja: { mode: "managed", version: "default" },
               conan: { mode: "managed", version: "default" },
-              cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+              cxx: { mode: "managed", version: "latest", preferredFamily: "clang" }
             },
             "conan"
           );
@@ -304,7 +408,7 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
               cmake: { mode: "system", version: "latest" },
               ninja: { mode: "system", version: "latest" },
               vcpkg: { mode: "system", version: "latest" },
-              cxx: { mode: "system", version: "latest", preferredFamily: "mingw" }
+              cxx: { mode: "system", version: "latest", preferredFamily: hostAdapter.compilerFamily }
             },
             dependencyBackend
           );
@@ -319,7 +423,7 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
             assert.equal(toolchain.vcpkg, undefined);
           }
           assertUsesToolDir(toolchain.cxx, toolPath, hostAdapter.getExecutableName("clang++"));
-          assert.equal(toolchain.compilerFamily, "mingw");
+          assert.equal(toolchain.compilerFamily, hostAdapter.platform === "win32" ? "mingw" : "clang");
           assert.equal(toolchain.envPath.length, 1);
           assert.equal(
             path.basename(toolchain.envPath[0]).toLowerCase(),
@@ -337,6 +441,7 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
 test("resolveToolchainOrThrow reports all missing managed tools", async () => {
   const hostRoot = await createTempDir("missing-tools");
   const { logger } = createLogger();
+  const hostAdapter = getHostAdapter();
 
   try {
     await withHostDataRoot(hostRoot, async () => {
@@ -348,7 +453,7 @@ test("resolveToolchainOrThrow reports all missing managed tools", async () => {
               cmake: { mode: "managed", version: "default" },
               ninja: { mode: "managed", version: "default" },
               vcpkg: { mode: "managed", version: "default" },
-              cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+              cxx: { mode: "managed", version: "latest", preferredFamily: hostAdapter.compilerFamily }
             },
             "vcpkg"
           ),

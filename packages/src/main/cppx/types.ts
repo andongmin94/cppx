@@ -11,7 +11,7 @@ import type {
 import type { HostPlatform } from "./platform";
 
 export type ToolName = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
-export type CompilerFamily = "mingw" | "msvc";
+export type CompilerFamily = "clang" | "mingw" | "msvc";
 export type ToolSourceKind =
   | "catalog-archive"
   | "catalog-git"

@@ -26,24 +26,25 @@ cppx는 두 가지 인터페이스를 제공합니다.
 ### 1. 의존성 설치
 
 ```bash
-cd packages
-npm install
+npm --prefix packages install
 ```
 
 ### 2. 도구 상태 준비
 
 ```bash
-npm run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools
 ```
 
-- Windows: 기본적으로 관리형 CMake, Ninja, vcpkg, MinGW 도구를 준비합니다.
-- macOS / Linux: 기본적으로 시스템 `cmake`, `ninja`, `clang++` 또는 `g++`를 확인합니다.
+- Windows: managed CMake, Ninja, vcpkg, Conan, and MinGW tooling are available from `cppx`.
+- macOS 14+: managed Homebrew/archive paths are supported for the official host slice.
+- Ubuntu 24.04: managed `apt`/archive/`pipx` paths are supported for the official Linux slice.
+- Other Linux: conservative system detection only.
 
 ### 3. 프로젝트 초기화
 
 ```bash
-npm run cppx -- init ./myapp --name myapp
-npm run cppx -- doctor ./myapp
+npm --prefix packages run cppx -- init ./myapp --name myapp
+npm --prefix packages run cppx -- doctor ./myapp
 ```
 
 초기화가 끝나면 다음 파일들이 생성됩니다.
@@ -61,8 +62,8 @@ npm run cppx -- doctor ./myapp
 ### 4. 빌드와 실행
 
 ```bash
-npm run cppx -- build ./myapp
-npm run cppx -- run ./myapp
+npm --prefix packages run cppx -- build ./myapp
+npm --prefix packages run cppx -- run ./myapp
 ```
 
 `run`은 `cargo run`처럼 build를 먼저 수행한 뒤 바이너리를 실행합니다.
@@ -74,19 +75,19 @@ npm run cppx -- run ./myapp
 ## GUI로 시작하기
 
 ```bash
-cd packages
-npm run dev
+npm --prefix packages install
+npm --prefix packages run dev
 ```
 
 GUI에서는 작업 폴더 선택, 설정 불러오기/저장, 도구 정책 편집, 프리셋 매트릭스 수정, Build/Run/Test/Pack, 로그 확인까지 같은 워크플로를 마우스로 다룰 수 있습니다.
 
 ## 현재 지원 범위
 
-| 항목 | Windows | macOS | Linux |
+| Item | Windows | macOS | Linux |
 |---|---|---|---|
-| 기본 backend | `vcpkg` | `none` | `none` |
-| 기본 도구 모드 | 관리형 + system 혼합 | system | system |
-| 관리형 CMake/Ninja/vcpkg catalog | 지원 | 미지원 | 미지원 |
-| Conan backend | 시스템 Conan 필요 | 시스템 Conan 필요 | 시스템 Conan 필요 |
+| Default backend | `vcpkg` | `none` | `none` |
+| Default tool mode | managed + system mixed | managed on official macOS hosts | managed on Ubuntu 24.04, system on other Linux |
+| Managed core tools | archive-managed `cmake`, `ninja`, `vcpkg`, `conan`, `cxx` | Homebrew/archive-managed official slice | Ubuntu 24.04 uses `apt`/archive/`pipx`; other Linux stays system-only |
+| Conan backend | managed archive path | managed Homebrew path | Ubuntu 24.04 managed `pipx`; other Linux system-only |
 
 자세한 제한 사항은 [도구 설치](./install.md)와 [마이그레이션](./migration.md) 문서를 함께 보는 것이 좋습니다.

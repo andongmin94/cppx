@@ -5,8 +5,7 @@
 ## Usage
 
 ```bash
-cd packages
-npm run cppx -- <command> [options]
+npm --prefix packages run cppx -- <command> [options]
 ```
 
 ## Commands
@@ -16,21 +15,22 @@ npm run cppx -- <command> [options]
 Prepare host tools for the active platform.
 
 ```bash
-npm run cppx -- install-tools
-npm run cppx -- install-tools --compiler mingw
-npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
+npm --prefix packages run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools --compiler clang
+npm --prefix packages run cppx -- install-tools --compiler mingw
+npm --prefix packages run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
 ```
 
 Options:
 
 | Option | Meaning |
 |---|---|
-| `--compiler <mingw|msvc>` | Choose the compiler family |
+| `--compiler <clang|mingw|msvc>` | Choose the compiler model for the active host |
 | `--msvc-installation-path <path>` | Prefer a specific MSVC installation |
 
 Provider summary:
 
-- Windows: verified archive installs, plus system MSVC detection
+- Windows: verified archive installs for `cmake`, `ninja`, `vcpkg`, `conan`, and the managed MinGW toolchain, plus system MSVC detection
 - macOS 14+: Homebrew for core tools and archive/bootstrap for `vcpkg`
 - Ubuntu 24.04: `apt` for `cmake`, `ninja`, `clang++`, archive/bootstrap for `vcpkg`, and `pipx` for `conan`
 - Other Linux: system detection only
@@ -45,8 +45,8 @@ Linux note:
 Create a new project.
 
 ```bash
-npm run cppx -- init ./myapp --name myapp
-npm run cppx -- init ./myapp --name myapp --backend conan
+npm --prefix packages run cppx -- init ./myapp --name myapp
+npm --prefix packages run cppx -- init ./myapp --name myapp --backend conan
 ```
 
 Options:
@@ -61,7 +61,7 @@ Options:
 Add a dependency to `.cppx/config.toml`.
 
 ```bash
-npm run cppx -- add fmt ./myapp
+npm --prefix packages run cppx -- add fmt ./myapp
 ```
 
 - `vcpkg`: written into `build/.cppx/vcpkg.json` on the next sync
@@ -73,8 +73,8 @@ npm run cppx -- add fmt ./myapp
 Run configure + build for the selected preset.
 
 ```bash
-npm run cppx -- build ./myapp
-npm run cppx -- build ./myapp --preset release-x64
+npm --prefix packages run cppx -- build ./myapp
+npm --prefix packages run cppx -- build ./myapp --preset release-x64
 ```
 
 ### `run [workspace]`
@@ -82,7 +82,7 @@ npm run cppx -- build ./myapp --preset release-x64
 Build first, then run the preset binary.
 
 ```bash
-npm run cppx -- run ./myapp
+npm --prefix packages run cppx -- run ./myapp
 ```
 
 ### `test [workspace]`
@@ -90,7 +90,7 @@ npm run cppx -- run ./myapp
 Run the CTest preset.
 
 ```bash
-npm run cppx -- test ./myapp
+npm --prefix packages run cppx -- test ./myapp
 ```
 
 ### `pack [workspace]`
@@ -98,7 +98,7 @@ npm run cppx -- test ./myapp
 Run the CPack preset.
 
 ```bash
-npm run cppx -- pack ./myapp
+npm --prefix packages run cppx -- pack ./myapp
 ```
 
 ### `status [workspace]`
@@ -106,8 +106,8 @@ npm run cppx -- pack ./myapp
 Inspect tool readiness and provenance.
 
 ```bash
-npm run cppx -- status
-npm run cppx -- status ./myapp
+npm --prefix packages run cppx -- status
+npm --prefix packages run cppx -- status ./myapp
 ```
 
 The output shows:
@@ -123,8 +123,8 @@ The output shows:
 Show blockers, warnings, and next steps for the current host and workspace.
 
 ```bash
-npm run cppx -- doctor
-npm run cppx -- doctor ./myapp
+npm --prefix packages run cppx -- doctor
+npm --prefix packages run cppx -- doctor ./myapp
 ```
 
 `doctor` checks:

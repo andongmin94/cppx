@@ -46,6 +46,7 @@ import {
 import type {
   CompilerFamily,
   CompilerToolPolicy,
+  ToolCatalogEntry,
   ToolName,
   ToolPolicy,
   ToolRecord,
@@ -229,7 +230,7 @@ function normalizeCompilerFamily(
   value: unknown,
   fallback: CompilerFamily
 ): CompilerFamily {
-  return value === "msvc" || value === "mingw" ? value : fallback;
+  return value === "clang" || value === "msvc" || value === "mingw" ? value : fallback;
 }
 
 function getHostArchLabel(): string {
@@ -297,7 +298,10 @@ export function shouldReuseManagedArchiveTool(
 function resolveRequestedPolicies(
   toolPolicies?: ProjectToolPoliciesPayload
 ): ResolvedToolPolicies {
-  const compilerFamily = normalizeCompilerFamily(toolPolicies?.cxx?.preferredFamily, "mingw");
+  const compilerFamily = normalizeCompilerFamily(
+    toolPolicies?.cxx?.preferredFamily,
+    hostAdapter.compilerFamily
+  );
   const defaultCmakeMode = getDefaultToolMode("cmake", compilerFamily);
   const defaultNinjaMode = getDefaultToolMode("ninja", compilerFamily);
   const defaultVcpkgMode = getDefaultToolMode("vcpkg", compilerFamily);
@@ -720,70 +724,90 @@ async function resolveLatestCxxSource(
   logger: CppxLogger
 ): Promise<ArchiveToolSource> {
   const entry = resolveToolCatalogEntry("cxx", policy.version, "mingw");
-  logger.info("install-tools", "GitHub 릴리스에서 llvm-mingw 컴파일러 패키지 조회 중");
+  return resolveGitHubReleaseArchiveSource(entry, policy.version, logger, {
+    subject: "llvm-mingw 컴파일러",
+    compilerFamily: "mingw",
+    missingAssetMessage: "다운로드 가능한 llvm-mingw x86_64 zip 에셋을 찾지 못했습니다."
+  });
+}
 
-  if (!entry.repoUrl || !entry.assetPatterns || entry.assetPatterns.length === 0) {
-    throw new CppxError("llvm-mingw catalog 설정이 올바르지 않습니다.");
+function matchesRequestedReleaseVersion(releaseTag: string, requestedVersion: string): boolean {
+  if (
+    requestedVersion === "latest" ||
+    requestedVersion === DEFAULT_TOOL_VERSION_TOKEN
+  ) {
+    return true;
   }
 
-  const response = await fetch(entry.repoUrl, { headers: GITHUB_API_HEADERS });
+  return (
+    sanitizeVersionToken(releaseTag) === sanitizeVersionToken(requestedVersion) ||
+    releaseTag.trim() === requestedVersion.trim()
+  );
+}
 
+async function resolveGitHubReleaseArchiveSource(
+  entry: ToolCatalogEntry,
+  requestedVersion: string,
+  logger: CppxLogger,
+  options: {
+    subject: string;
+    missingAssetMessage: string;
+    compilerFamily?: CompilerFamily;
+  }
+): Promise<ArchiveToolSource> {
+  if (!entry.repoUrl || !entry.assetPatterns || entry.assetPatterns.length === 0) {
+    throw new CppxError(`${options.subject} catalog 설정이 올바르지 않습니다.`);
+  }
+
+  logger.info("install-tools", `GitHub 릴리스에서 ${options.subject} 패키지 조회 중`);
+
+  const response = await fetch(entry.repoUrl, { headers: GITHUB_API_HEADERS });
   if (!response.ok) {
     throw new CppxError(
-      "llvm-mingw 릴리스 메타데이터를 조회할 수 없습니다",
+      `${options.subject} 릴리스 메타데이터를 조회할 수 없습니다`,
       `HTTP status: ${response.status}`
     );
   }
 
+  const assetPatterns = entry.assetPatterns.map((pattern) => new RegExp(pattern, "i"));
   const releases = (await response.json()) as GitHubRelease[];
   for (const release of releases) {
-    if (release.draft) {
+    if (release.draft || !matchesRequestedReleaseVersion(release.tag_name, requestedVersion)) {
       continue;
     }
 
-    if (
-      policy.version !== "latest" &&
-      policy.version !== DEFAULT_TOOL_VERSION_TOKEN &&
-      sanitizeVersionToken(release.tag_name) !== sanitizeVersionToken(policy.version) &&
-      release.tag_name.trim() !== policy.version.trim()
-    ) {
-      continue;
-    }
-
-    const selected = entry.assetPatterns
-      .map((pattern) => new RegExp(pattern, "i"))
+    const selected = assetPatterns
       .map((pattern) => release.assets.find((asset) => pattern.test(asset.name)))
       .find((asset) => asset !== undefined);
-
-    if (selected) {
-      const sha256 = normalizeSha256Digest(selected.digest);
-      if (!sha256) {
-        throw new CppxError(
-          "llvm-mingw 릴리스 에셋에 검증 가능한 SHA-256 정보가 없습니다.",
-          selected.name
-        );
-      }
-
-      logger.info(
-        "install-tools",
-        `llvm-mingw 릴리스 사용: ${release.tag_name} (${selected.name})`
-      );
-      return {
-        version: sanitizeVersionToken(release.tag_name),
-        urls: [selected.browser_download_url],
-        sha256,
-        executable: entry.executable,
-        sourceKind: entry.sourceKind,
-        requestedVersion: policy.version,
-        catalogId: entry.id,
-        compilerFamily: "mingw"
-      };
+    if (!selected) {
+      continue;
     }
+
+    const sha256 = normalizeSha256Digest(selected.digest);
+    if (!sha256) {
+      throw new CppxError(
+        `${options.subject} 릴리스 에셋에 검증 가능한 SHA-256 정보가 없습니다.`,
+        selected.name
+      );
+    }
+
+    logger.info(
+      "install-tools",
+      `${options.subject} 릴리스 사용: ${release.tag_name} (${selected.name})`
+    );
+    return {
+      version: sanitizeVersionToken(release.tag_name),
+      urls: [selected.browser_download_url],
+      sha256,
+      executable: entry.executable,
+      sourceKind: entry.sourceKind,
+      requestedVersion,
+      catalogId: entry.id,
+      compilerFamily: options.compilerFamily
+    };
   }
 
-  throw new CppxError(
-    "다운로드 가능한 llvm-mingw x86_64 zip 에셋을 찾지 못했습니다"
-  );
+  throw new CppxError(options.missingAssetMessage, `requested=${requestedVersion}`);
 }
 
 async function extractZip(
@@ -1832,9 +1856,11 @@ function toMessage(error: unknown): string {
 }
 
 function inferCompilerFamily(executable: string): CompilerFamily {
-  return path.basename(executable).toLowerCase() === hostAdapter.getExecutableName("cl")
-    ? "msvc"
-    : "mingw";
+  if (path.basename(executable).toLowerCase() === hostAdapter.getExecutableName("cl")) {
+    return "msvc";
+  }
+
+  return hostAdapter.platform === "win32" ? "mingw" : "clang";
 }
 
 async function installMsvcCompiler(
@@ -1917,6 +1943,15 @@ async function installConan(
   policy: ToolPolicy,
   logger: CppxLogger
 ): Promise<ResolvedToolInfo> {
+  if (hostAdapter.platform === "win32") {
+    const entry = resolveToolCatalogEntry("conan", policy.version);
+    const source = await resolveGitHubReleaseArchiveSource(entry, policy.version, logger, {
+      subject: "Conan",
+      missingAssetMessage: "다운로드 가능한 Conan Windows zip 에셋을 찾지 못했습니다."
+    });
+    return installArchiveToolFromSource("conan", source, logger);
+  }
+
   if (hostAdapter.platform === "darwin") {
     return installHomebrewManagedTool("conan", policy, logger);
   }
@@ -1925,7 +1960,9 @@ async function installConan(
     return installPipxManagedConan(policy, logger);
   }
 
-  throw new CppxError("conan managed 설치는 현재 macOS Homebrew 또는 Ubuntu 24.04 pipx 경로만 지원됩니다.");
+  throw new CppxError(
+    "conan managed 설치는 현재 Windows release archive, macOS Homebrew, 또는 Ubuntu 24.04 pipx 경로를 지원합니다."
+  );
 }
 
 function formatInstallError(tool: ToolName, error: unknown): string {
@@ -2191,6 +2228,9 @@ function getMatchingManagedRecord(record: ToolRecord | undefined): ToolRecord | 
 }
 
 function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
+  if (hostAdapter.platform === "win32" && (tool === "cxx" || tool === "conan")) {
+    return "catalog-github-release";
+  }
   if (hostAdapter.platform === "darwin" && tool !== "vcpkg") {
     return "homebrew-managed";
   }
@@ -2199,9 +2239,6 @@ function getManagedFallbackSourceKind(tool: ToolName): ToolSourceKind {
   }
   if (hostAdapter.platform === "linux" && (tool === "cmake" || tool === "ninja" || tool === "cxx")) {
     return "apt-managed";
-  }
-  if (tool === "cxx") {
-    return "catalog-github-release";
   }
   return "catalog-archive";
 }

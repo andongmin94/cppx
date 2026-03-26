@@ -32,6 +32,7 @@ test("windows host adapter centralizes executable naming, roots, and shell comma
       assert.equal(adapter.normalizePath("C:/Temp/Demo"), "c:\\temp\\demo");
       assert.equal(adapter.comparePaths("C:/Temp/Demo", "C:\\temp\\demo"), 0);
       assert.equal(adapter.getDefaultDependencyBackend(), "vcpkg");
+      assert.equal(adapter.getDefaultToolMode("conan"), "managed");
       assert.equal(adapter.getDefaultTargetTriplet("mingw"), "x64-mingw-dynamic");
 
       const shell = adapter.getShellCommand("cmd");
@@ -63,7 +64,7 @@ test("linux host adapter provides native defaults and commands", async () => {
       assert.equal(adapter.getCppxRoot(), path.join(dataRoot, "cppx"));
       assert.equal(adapter.getDefaultDependencyBackend(), "none");
       assert.equal(
-        adapter.getDefaultTargetTriplet("mingw"),
+        adapter.getDefaultTargetTriplet("clang"),
         `${process.arch === "arm64" ? "arm64" : "x64"}-linux`
       );
 
@@ -104,7 +105,7 @@ test("darwin host adapter uses Application Support and native triplets", async (
   assert.equal(adapter.getCppxRoot(), path.join(expectedRoot, "cppx"));
   assert.equal(adapter.getDefaultDependencyBackend(), "none");
   assert.equal(
-    adapter.getDefaultTargetTriplet("mingw"),
+    adapter.getDefaultTargetTriplet("clang"),
     `${process.arch === "arm64" ? "arm64" : "x64"}-osx`
   );
   assert.equal(adapter.getAppDataRoot(), expectedRoot);

@@ -409,59 +409,93 @@ function toErrorMessage(error: unknown): string {
   return "알 수 없는 오류가 발생했습니다.";
 }
 
-function createDefaultToolPolicies(
-  compilerFamily: CompilerPreference = "mingw",
-  platform: HostPlatformPayload = "win32"
-): Required<ProjectToolPoliciesPayload> {
-  if (platform === "darwin") {
-    return {
-      cmake: { mode: "managed", version: "default" },
-      ninja: { mode: "managed", version: "default" },
-      vcpkg: { mode: "managed", version: "default" },
-      conan: { mode: "managed", version: "default" },
-      cxx: {
-        mode: "managed",
-        version: "latest",
-        preferredFamily: "mingw",
-        msvcInstallationPath: ""
-      }
-    };
-  }
+function getDefaultCompilerPreference(platform: HostPlatformPayload): CompilerPreference {
+  return platform === "win32" ? "mingw" : "clang";
+}
 
-  if (platform !== "win32") {
-    return {
-      cmake: { mode: "system", version: "default" },
-      ninja: { mode: "system", version: "default" },
-      vcpkg: { mode: "system", version: "default" },
-      conan: { mode: "system", version: "default" },
-      cxx: {
-        mode: "system",
-        version: "default",
-        preferredFamily: "mingw",
-        msvcInstallationPath: ""
-      }
-    };
-  }
+function createFallbackToolPolicies(
+  platform: HostPlatformPayload
+): Required<ProjectToolPoliciesPayload> {
+  const compilerFamily = getDefaultCompilerPreference(platform);
 
   return {
-    cmake: { mode: "managed", version: "default" },
-    ninja: { mode: "managed", version: "default" },
-    vcpkg: { mode: "managed", version: "default" },
+    cmake: { mode: "system", version: "default" },
+    ninja: { mode: "system", version: "default" },
+    vcpkg: { mode: "system", version: "default" },
     conan: { mode: "system", version: "default" },
-    cxx:
-      compilerFamily === "msvc"
-        ? {
-            mode: "system",
-            version: "default",
-            preferredFamily: "msvc",
-            msvcInstallationPath: ""
-          }
-        : {
-            mode: "managed",
-            version: "latest",
-            preferredFamily: "mingw",
-            msvcInstallationPath: ""
-          }
+    cxx: {
+      mode: "system",
+      version: compilerFamily === "mingw" ? "latest" : "default",
+      preferredFamily: compilerFamily,
+      msvcInstallationPath: ""
+    }
+  };
+}
+
+function createLoadingHostSupport(platform: HostPlatformPayload): HostSupportPayload {
+  const arch = detectRendererArch();
+
+  return {
+    platform,
+    arch,
+    hostLabel:
+      platform === "win32"
+        ? `Windows ${arch}`
+        : platform === "darwin"
+          ? `macOS ${arch}`
+          : `Linux ${arch}`,
+    tier: "best-effort",
+    managedLifecycleReady: false,
+    recommendedProvider: "unknown",
+    notes: ["서비스에서 host capability contract를 불러오는 중입니다."]
+  };
+}
+
+function createLoadingToolCapabilities(): Record<
+  "cmake" | "ninja" | "vcpkg" | "conan" | "cxx",
+  ToolLifecycleCapabilities
+> {
+  return {
+    cmake: {
+      provider: "unknown",
+      detect: false,
+      install: false,
+      repair: false,
+      remove: false,
+      note: "서비스 연결 후 실제 capability가 채워집니다."
+    },
+    ninja: {
+      provider: "unknown",
+      detect: false,
+      install: false,
+      repair: false,
+      remove: false,
+      note: "서비스 연결 후 실제 capability가 채워집니다."
+    },
+    vcpkg: {
+      provider: "unknown",
+      detect: false,
+      install: false,
+      repair: false,
+      remove: false,
+      note: "서비스 연결 후 실제 capability가 채워집니다."
+    },
+    conan: {
+      provider: "unknown",
+      detect: false,
+      install: false,
+      repair: false,
+      remove: false,
+      note: "서비스 연결 후 실제 capability가 채워집니다."
+    },
+    cxx: {
+      provider: "unknown",
+      detect: false,
+      install: false,
+      repair: false,
+      remove: false,
+      note: "서비스 연결 후 실제 capability가 채워집니다."
+    }
   };
 }
 
@@ -481,99 +515,6 @@ function detectRendererArch(): string {
   return userAgent.includes("arm64") || userAgent.includes("aarch64") ? "arm64" : "x64";
 }
 
-function createFallbackHostSupport(platform: HostPlatformPayload): HostSupportPayload {
-  const arch = detectRendererArch();
-
-  if (platform === "win32") {
-    return {
-      platform,
-      arch,
-      hostLabel: `Windows ${arch}`,
-      tier: "official",
-      managedLifecycleReady: true,
-      recommendedProvider: "archive",
-      notes: []
-    };
-  }
-
-  if (platform === "darwin") {
-    return {
-      platform,
-      arch,
-      hostLabel: `macOS ${arch}`,
-      tier: "official",
-      managedLifecycleReady: false,
-      recommendedProvider: "homebrew",
-      notes: ["Homebrew 준비 여부를 아직 확인하지 못했습니다. 서비스 연결 후 실제 capability가 갱신됩니다."]
-    };
-  }
-
-  return {
-    platform,
-    arch,
-    hostLabel: `Linux ${arch}`,
-    tier: "best-effort",
-    managedLifecycleReady: false,
-    recommendedProvider: "system",
-    notes: ["현재 릴리스에서는 system 도구 기반만 안전하게 사용할 수 있습니다."]
-  };
-}
-
-function createFallbackToolCapabilities(
-  platform: HostPlatformPayload
-): Record<"cmake" | "ninja" | "vcpkg" | "conan" | "cxx", ToolLifecycleCapabilities> {
-  if (platform === "win32") {
-    return {
-      cmake: { provider: "archive", detect: true, install: true, repair: true, remove: true },
-      ninja: { provider: "archive", detect: true, install: true, repair: true, remove: true },
-      vcpkg: { provider: "archive", detect: true, install: true, repair: true, remove: true },
-      conan: {
-        provider: "system",
-        detect: true,
-        install: false,
-        repair: false,
-        remove: false,
-        note: "Windows에서는 conan을 PATH에서 감지합니다."
-      },
-      cxx: {
-        provider: "archive",
-        detect: true,
-        install: true,
-        repair: true,
-        remove: true,
-        note: "Windows에서는 MinGW 관리형 설치를 우선 지원합니다."
-      }
-    };
-  }
-
-  if (platform === "darwin") {
-    return {
-      cmake: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
-      ninja: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
-      vcpkg: { provider: "archive", detect: true, install: true, repair: true, remove: true },
-      conan: { provider: "homebrew", detect: true, install: false, repair: false, remove: false },
-      cxx: {
-        provider: "homebrew",
-        detect: true,
-        install: false,
-        repair: false,
-        remove: false,
-        note: "macOS managed C++ 도구는 Homebrew llvm formula를 사용합니다."
-      }
-    };
-  }
-
-  const provider = "system";
-  const note = "현재 릴리스에서는 system 도구 기반만 안전하게 사용할 수 있습니다.";
-  return {
-    cmake: { provider, detect: true, install: false, repair: false, remove: false, note },
-    ninja: { provider, detect: true, install: false, repair: false, remove: false, note },
-    vcpkg: { provider, detect: true, install: false, repair: false, remove: false, note },
-    conan: { provider, detect: true, install: false, repair: false, remove: false, note },
-    cxx: { provider, detect: true, install: false, repair: false, remove: false, note }
-  };
-}
-
 function cloneToolPolicies(
   toolPolicies: Required<ProjectToolPoliciesPayload>
 ): Required<ProjectToolPoliciesPayload> {
@@ -591,40 +532,43 @@ function createFallbackHostDefaults(): HostDefaultsPayload {
   return {
     platform,
     defaultPreset: `debug-${detectRendererArch()}`,
-    dependencyBackend: platform === "win32" ? "vcpkg" : "none",
-    toolPolicies: createDefaultToolPolicies("mingw", platform),
-    hostSupport: createFallbackHostSupport(platform),
-    toolCapabilities: createFallbackToolCapabilities(platform)
+    dependencyBackend: "none",
+    toolPolicies: createFallbackToolPolicies(platform),
+    hostSupport: createLoadingHostSupport(platform),
+    toolCapabilities: createLoadingToolCapabilities()
   };
 }
 
-function toToolPolicyState(config: ProjectConfigPayload): Required<ProjectToolPoliciesPayload> {
+function toToolPolicyState(
+  config: ProjectConfigPayload,
+  defaults: HostDefaultsPayload = createFallbackHostDefaults()
+): Required<ProjectToolPoliciesPayload> {
   const compilerFamily =
     config.tools?.cxx?.preferredFamily ??
     config.compiler?.preferredFamily ??
-    "mingw";
-  const defaults = createDefaultToolPolicies(compilerFamily, detectRendererPlatform());
+    defaults.toolPolicies.cxx.preferredFamily ??
+    getDefaultCompilerPreference(defaults.platform);
 
   return {
     cmake: {
-      mode: config.tools?.cmake?.mode ?? defaults.cmake.mode,
-      version: config.tools?.cmake?.version ?? defaults.cmake.version
+      mode: config.tools?.cmake?.mode ?? defaults.toolPolicies.cmake.mode,
+      version: config.tools?.cmake?.version ?? defaults.toolPolicies.cmake.version
     },
     ninja: {
-      mode: config.tools?.ninja?.mode ?? defaults.ninja.mode,
-      version: config.tools?.ninja?.version ?? defaults.ninja.version
+      mode: config.tools?.ninja?.mode ?? defaults.toolPolicies.ninja.mode,
+      version: config.tools?.ninja?.version ?? defaults.toolPolicies.ninja.version
     },
     vcpkg: {
-      mode: config.tools?.vcpkg?.mode ?? defaults.vcpkg.mode,
-      version: config.tools?.vcpkg?.version ?? defaults.vcpkg.version
+      mode: config.tools?.vcpkg?.mode ?? defaults.toolPolicies.vcpkg.mode,
+      version: config.tools?.vcpkg?.version ?? defaults.toolPolicies.vcpkg.version
     },
     conan: {
-      mode: config.tools?.conan?.mode ?? defaults.conan.mode,
-      version: config.tools?.conan?.version ?? defaults.conan.version
+      mode: config.tools?.conan?.mode ?? defaults.toolPolicies.conan.mode,
+      version: config.tools?.conan?.version ?? defaults.toolPolicies.conan.version
     },
     cxx: {
-      mode: config.tools?.cxx?.mode ?? defaults.cxx.mode,
-      version: config.tools?.cxx?.version ?? defaults.cxx.version,
+      mode: config.tools?.cxx?.mode ?? defaults.toolPolicies.cxx.mode,
+      version: config.tools?.cxx?.version ?? defaults.toolPolicies.cxx.version,
       preferredFamily: compilerFamily,
       msvcInstallationPath:
         config.tools?.cxx?.msvcInstallationPath ??
@@ -827,11 +771,19 @@ export default function App() {
   const compilerFamilyOptions = useMemo(() => {
     const options = getCompilerPreferenceOptions(hostDefaults.platform);
     if (
-      hostDefaults.platform !== "win32" &&
-      toolPolicies.cxx.preferredFamily === "msvc" &&
-      !options.some((option) => option.value === "msvc")
+      toolPolicies.cxx.preferredFamily &&
+      !options.some((option) => option.value === toolPolicies.cxx.preferredFamily)
     ) {
-      return [...options, { value: "msvc" as const, label: "MSVC (Windows 전용)" }];
+      return [
+        ...options,
+        {
+          value: toolPolicies.cxx.preferredFamily,
+          label: `${getCompilerPreferenceLabel(
+            hostDefaults.platform,
+            toolPolicies.cxx.preferredFamily
+          )} (legacy)`
+        }
+      ];
     }
     return options;
   }, [hostDefaults.platform, toolPolicies.cxx.preferredFamily]);
@@ -1108,7 +1060,7 @@ export default function App() {
     setSourceFile(config.sourceFile);
     setCxxStandardInput(String(config.cxxStandard));
     setTargetTriplet(config.targetTriplet);
-    setToolPolicies(toToolPolicyState(config));
+    setToolPolicies(toToolPolicyState(config, hostDefaults));
     setPresetConfigs(config.presets ?? []);
     setCmakeDefinitionsInput(toListInput(config.cmake.compileDefinitions));
     setCmakeOptionsInput(toListInput(config.cmake.compileOptions));
@@ -1322,7 +1274,9 @@ export default function App() {
 
       const compilerLabel = getCompilerPreferenceLabel(
         hostDefaults.platform,
-        compilerPreference ?? toolPolicies.cxx.preferredFamily ?? "mingw"
+        compilerPreference ??
+          toolPolicies.cxx.preferredFamily ??
+          getDefaultCompilerPreference(hostDefaults.platform)
       );
       showStatusToast(
         `${compilerLabel} 기준으로 도구 설치를 진행합니다.`,
@@ -1387,7 +1341,9 @@ export default function App() {
         status: "running",
         stage: `도구 설치를 시작합니다 (컴파일러: ${getCompilerPreferenceLabel(
           hostDefaults.platform,
-          compilerPreference ?? toolPolicies.cxx.preferredFamily ?? "mingw"
+          compilerPreference ??
+            toolPolicies.cxx.preferredFamily ??
+            getDefaultCompilerPreference(hostDefaults.platform)
         )})`,
         percent: 4,
         completed: createEmptyInstallCompleted(),
@@ -1753,7 +1709,10 @@ export default function App() {
                             <div className="space-y-1.5">
                               <Label className="text-xs">preferred_family</Label>
                               <Select
-                                value={toolPolicies.cxx.preferredFamily ?? "mingw"}
+                                value={
+                                  toolPolicies.cxx.preferredFamily ??
+                                  getDefaultCompilerPreference(hostDefaults.platform)
+                                }
                                 onValueChange={(value) =>
                                   updateToolPolicy("cxx", "preferredFamily", value)
                                 }
@@ -1771,7 +1730,7 @@ export default function App() {
                               </Select>
                               {hostDefaults.platform !== "win32" && (
                                 <p className="text-[11px] text-muted-foreground">
-                                  이 호스트에서는 native clang/g++ 계열로 해석됩니다.
+                                  이 호스트에서는 Clang compiler model을 사용합니다.
                                 </p>
                               )}
                             </div>

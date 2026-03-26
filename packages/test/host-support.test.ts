@@ -12,6 +12,7 @@ import {
 test("host support marks Windows as official and lifecycle-ready", async () => {
   const support = await resolveHostSupport({ platform: "win32", arch: "x64" });
   const cmake = await resolveToolLifecycleCapabilities("cmake", { platform: "win32" });
+  const conan = await resolveToolLifecycleCapabilities("conan", { platform: "win32" });
 
   assert.equal(support.platform, "win32");
   assert.equal(support.tier, "official");
@@ -20,6 +21,9 @@ test("host support marks Windows as official and lifecycle-ready", async () => {
   assert.equal(cmake.install, true);
   assert.equal(cmake.remove, true);
   assert.equal(cmake.provider, "archive");
+  assert.equal(conan.provider, "archive");
+  assert.equal(conan.install, true);
+  assert.equal(conan.remove, true);
 });
 
 test("host support marks supported macOS + Homebrew as official managed path", async () => {

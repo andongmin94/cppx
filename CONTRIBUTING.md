@@ -1,38 +1,56 @@
-# Contributing
+# CONTRIBUTING
 
-## Local setup
+Thanks for contributing to `cppx`.
+
+This repository is currently standardizing around a single cross-platform product contract and a root-only AI instruction system.
+
+## Root document policy
+
+The root markdown files are intentionally limited to:
+
+- `README.md`
+- `CONTRIBUTING.md`
+- `LICENSE.md`
+- `AGENTS.md`
+- `SPEC.md`
+- `TASK.md`
+
+Do not reintroduce parallel planning systems or historical AI overlays.
+
+## How to work in this repository
+
+Use the repository root as the default working directory.
+
+Validation commands:
 
 ```bash
-cd packages
-npm install
+npm --prefix packages run typecheck
+npm --prefix packages run test
+npm --prefix packages run build
+npm --prefix packages run smoke:ci
 ```
+
+## Current engineering priority
+
+The current repository priority is **cross-platform parity**.
+
+That means:
+
+- Windows, macOS, and the official Ubuntu 24.04 slice must expose the same conceptual controls in CLI and GUI
+- docs, runtime messaging, and tests must agree on support policy
+- host-specific providers may differ internally, but the user-visible model must stay consistent
+
+## Change expectations
+
+A good change in this repository should:
+
+- stay scoped to the current phase in `TASK.md`
+- follow the product contract in `SPEC.md`
+- update docs when behavior or support claims change
+- avoid introducing new drift between CLI, GUI, docs, and tests
 
 ## Validation
 
-Run the repo-standard checks before opening a PR.
+Run the validations listed in `TASK.md`.
 
-```bash
-cd packages
-npm run typecheck
-npm run test
-```
-
-If your host already has the required native tools, also run:
-
-```bash
-cd packages
-npm run smoke:native
-```
-
-## Scope rules
-
-- Keep changes scoped to the task or milestone you are working on.
-- Do not edit generated files under `build/.cppx/` by hand.
-- Update tests and docs in the same change when behavior or commands change.
-- Preserve current Windows behavior unless the active plan explicitly changes it.
-
-## Pull requests
-
-- Describe the user-visible change and the validation you actually ran.
-- Call out compatibility impact and any deferred risks.
-- Prefer small, reviewable patches over large unrelated cleanup.
+If a validation cannot run in your environment, document that clearly in your change summary.

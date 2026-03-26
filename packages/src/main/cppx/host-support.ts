@@ -388,9 +388,9 @@ export async function resolveToolLifecycleCapabilities(
   if (support.platform === "win32") {
     if (tool === "conan") {
       return createLifecycleCapabilities(
-        "system",
-        { detect: true, install: false, repair: false, remove: false },
-        "Windows currently detects conan from PATH only."
+        "archive",
+        { detect: true, install: true, repair: true, remove: true },
+        "Windows manages Conan from the official verified release archive."
       );
     }
 

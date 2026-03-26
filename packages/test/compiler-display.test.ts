@@ -6,11 +6,11 @@ import {
   getCompilerPreferenceOptions
 } from "../src/shared/compiler-display";
 
-test("compiler display helpers expose native wording on POSIX hosts", () => {
-  assert.equal(formatCompilerPreference("linux", "mingw"), "native");
-  assert.equal(getCompilerPreferenceLabel("darwin", "mingw"), "Native (clang/g++)");
+test("compiler display helpers expose clang wording on POSIX hosts", () => {
+  assert.equal(formatCompilerPreference("linux", "clang"), "clang");
+  assert.equal(getCompilerPreferenceLabel("darwin", "clang"), "Clang");
   assert.deepEqual(getCompilerPreferenceOptions("linux"), [
-    { value: "mingw", label: "Native (clang/g++)" }
+    { value: "clang", label: "Clang" }
   ]);
 });
 

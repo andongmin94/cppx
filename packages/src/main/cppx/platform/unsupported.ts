@@ -20,7 +20,7 @@ export function createUnsupportedHostAdapter(platform: Exclude<HostPlatform, "wi
 
   return {
     platform,
-    compilerFamily: "mingw",
+    compilerFamily: "clang",
 
     getAppDataRoot(): string {
       throw new Error(getUnsupportedMessage(platform, "app data root"));

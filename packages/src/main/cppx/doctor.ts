@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type {
+  CompilerPreference,
   DependencyBackend,
   HostSupportPayload,
   ProjectToolPoliciesPayload
@@ -42,7 +43,7 @@ export interface DoctorReport {
     platform: NodeJS.Platform;
     arch: string;
     defaultBackend: DependencyBackend;
-    compilerFamily: "mingw" | "msvc";
+    compilerFamily: CompilerPreference;
   };
   support: HostSupportPayload;
   activeBackend: DependencyBackend;
@@ -57,7 +58,7 @@ interface WorkspaceConfigSummary {
   readable: boolean;
   schemaVersion?: number;
   dependencyBackend: DependencyBackend;
-  compilerFamily: "mingw" | "msvc";
+  compilerFamily: CompilerPreference;
   toolPolicies?: ProjectToolPoliciesPayload;
   targetName?: string;
   legacyConfig: boolean;

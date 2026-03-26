@@ -2,26 +2,45 @@ import type { CompilerPreference, HostPlatformPayload } from "./contracts";
 
 type DisplayPlatform = HostPlatformPayload | NodeJS.Platform;
 
-export function formatCompilerPreference(
+function normalizeDisplayCompilerPreference(
   platform: DisplayPlatform,
   compilerPreference: CompilerPreference
-): string {
+): CompilerPreference {
   if (compilerPreference === "msvc") {
     return "msvc";
   }
 
-  return platform === "win32" ? "mingw" : "native";
+  if (compilerPreference === "mingw") {
+    return platform === "win32" ? "mingw" : "clang";
+  }
+
+  return "clang";
+}
+
+export function formatCompilerPreference(
+  platform: DisplayPlatform,
+  compilerPreference: CompilerPreference
+): string {
+  const normalized = normalizeDisplayCompilerPreference(platform, compilerPreference);
+
+  if (normalized === "msvc") {
+    return "msvc";
+  }
+
+  return normalized;
 }
 
 export function getCompilerPreferenceLabel(
   platform: DisplayPlatform,
   compilerPreference: CompilerPreference
 ): string {
-  if (compilerPreference === "msvc") {
+  const normalized = normalizeDisplayCompilerPreference(platform, compilerPreference);
+
+  if (normalized === "msvc") {
     return "MSVC";
   }
 
-  return platform === "win32" ? "MinGW" : "Native (clang/g++)";
+  return normalized === "mingw" ? "MinGW" : "Clang";
 }
 
 export function getCompilerPreferenceOptions(
@@ -34,5 +53,5 @@ export function getCompilerPreferenceOptions(
     ];
   }
 
-  return [{ value: "mingw", label: getCompilerPreferenceLabel(platform, "mingw") }];
+  return [{ value: "clang", label: getCompilerPreferenceLabel(platform, "clang") }];
 }

@@ -32,7 +32,26 @@ const hostAdapter = getHostAdapter();
 type PartialProjectConfig = Partial<ProjectConfigPayload>;
 
 function isCompilerPreference(value: unknown): value is CompilerPreference {
-  return value === "mingw" || value === "msvc";
+  return value === "clang" || value === "mingw" || value === "msvc";
+}
+
+function normalizeCompilerPreferenceForHost(
+  value: unknown,
+  fallback: CompilerPreference
+): CompilerPreference {
+  if (value === "msvc") {
+    return "msvc";
+  }
+
+  if (value === "mingw") {
+    return hostAdapter.platform === "win32" ? "mingw" : hostAdapter.compilerFamily;
+  }
+
+  if (value === "clang") {
+    return hostAdapter.platform === "win32" ? fallback : "clang";
+  }
+
+  return fallback;
 }
 
 function isDependencyBackend(value: unknown): value is DependencyBackend {
@@ -213,7 +232,7 @@ function defaultCompilerPolicy(compilerFamily: CompilerFamily): CompilerToolPoli
   return {
     mode,
     version: mode === "managed" ? DEFAULT_COMPILER_VERSION : DEFAULT_MANAGED_VERSION,
-    preferredFamily: "mingw"
+    preferredFamily: compilerFamily === "clang" ? "clang" : "mingw"
   };
 }
 
@@ -232,13 +251,15 @@ function normalizeCompilerPolicy(
 ): CompilerToolPolicy {
   const base = normalizeToolPolicy(raw, fallback);
   const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const fallbackPreference =
+    compiler.preferredFamily ?? fallback.preferredFamily ?? hostAdapter.compilerFamily;
 
   return {
     ...base,
-    preferredFamily:
-      isCompilerPreference(record.preferredFamily)
-        ? record.preferredFamily
-        : compiler.preferredFamily ?? fallback.preferredFamily,
+    preferredFamily: normalizeCompilerPreferenceForHost(
+      record.preferredFamily,
+      fallbackPreference
+    ),
     msvcInstallationPath:
       normalizeOptionalString(record.msvcInstallationPath) ??
       compiler.msvcInstallationPath ??
@@ -251,12 +272,13 @@ function normalizeCompilerConfig(
   fallback: CompilerConfigPayload
 ): CompilerConfigPayload {
   const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const fallbackPreference = fallback.preferredFamily ?? hostAdapter.compilerFamily;
 
   return {
-    preferredFamily:
-      isCompilerPreference(record.preferredFamily)
-        ? record.preferredFamily
-        : fallback.preferredFamily,
+    preferredFamily: normalizeCompilerPreferenceForHost(
+      record.preferredFamily,
+      fallbackPreference
+    ),
     msvcInstallationPath:
       normalizeOptionalString(record.msvcInstallationPath) ??
       fallback.msvcInstallationPath
@@ -364,13 +386,15 @@ function mergePackageConfig(
 
 export function defaultProjectConfig(
   projectName: string,
-  compilerFamily: CompilerFamily = "mingw"
+  compilerFamily: CompilerFamily = hostAdapter.compilerFamily
 ): NormalizedProjectConfig {
   const targetTriplet = defaultTargetTripletForCompiler(compilerFamily);
   const targetName = createSafeTargetName(projectName);
   const compiler =
     compilerFamily === "msvc"
       ? { preferredFamily: "msvc" as const }
+      : compilerFamily === "clang"
+        ? { preferredFamily: "clang" as const }
       : { preferredFamily: "mingw" as const };
 
   return {
@@ -407,11 +431,13 @@ export function normalizeProjectConfig(
 ): NormalizedProjectConfig {
   const inferredCompilerFamily =
     options.compilerFamily ??
-    (isCompilerPreference(raw.compiler?.preferredFamily)
-      ? raw.compiler.preferredFamily
-      : isCompilerPreference(raw.tools?.cxx?.preferredFamily)
-        ? raw.tools.cxx.preferredFamily
-        : options.base?.compiler.preferredFamily ?? "mingw");
+    normalizeCompilerPreferenceForHost(
+      raw.compiler?.preferredFamily,
+      normalizeCompilerPreferenceForHost(
+        raw.tools?.cxx?.preferredFamily,
+        options.base?.compiler.preferredFamily ?? hostAdapter.compilerFamily
+      )
+    );
   const seed = options.base ?? defaultProjectConfig(fallbackName, inferredCompilerFamily);
   const name = normalizeString(raw.name, seed.name) || fallbackName;
   const packageSeed =
@@ -616,7 +642,7 @@ function isPresetConfigPayload(value: unknown): value is PresetConfigPayload {
 export function parseConfigToml(
   content: string,
   fallbackName: string,
-  compilerFamily: CompilerFamily = "mingw"
+  compilerFamily: CompilerFamily = hostAdapter.compilerFamily
 ): NormalizedProjectConfig {
   const seed = defaultProjectConfig(fallbackName, compilerFamily);
   const raw: PartialProjectConfig = {
@@ -955,7 +981,7 @@ async function migrateLegacyConfig(
 
 export async function readProjectConfig(
   workspace: string,
-  compilerFamily: CompilerFamily = "mingw"
+  compilerFamily: CompilerFamily = hostAdapter.compilerFamily
 ): Promise<NormalizedProjectConfig> {
   const configPath = path.join(workspace, CPPX_CONFIG_PATH);
   const fallbackName = path.basename(workspace);

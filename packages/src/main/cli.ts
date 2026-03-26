@@ -174,9 +174,9 @@ program
   .description(
     "Resolve or install host tools such as CMake, Ninja, vcpkg, conan, and C++ compiler"
   )
-  .option("--compiler <compiler>", "Compiler family (Windows only: mingw or msvc)")
+  .option("--compiler <compiler>", "Compiler preference (win32: mingw|msvc, darwin/linux: clang)")
   .option("--msvc-installation-path <path>", "Preferred MSVC installation path")
-  .action(async (options: { compiler?: "mingw" | "msvc"; msvcInstallationPath?: string }) => {
+  .action(async (options: { compiler?: "clang" | "mingw" | "msvc"; msvcInstallationPath?: string }) => {
     await execute({
       action: "install-tools",
       workspace: process.cwd(),

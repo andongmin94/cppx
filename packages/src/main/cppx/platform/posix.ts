@@ -118,7 +118,7 @@ function createPosixHostAdapter(platform: Extract<HostPlatform, "darwin" | "linu
 
   return {
     platform,
-    compilerFamily: "mingw",
+    compilerFamily: "clang",
 
     getAppDataRoot(): string {
       return getPosixDataHome(platform);

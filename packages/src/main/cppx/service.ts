@@ -68,10 +68,17 @@ export class CppxService {
     if (payload.compilerPreference === "msvc") {
       cxxPolicy.mode = cxxPolicy.mode ?? "system";
       cxxPolicy.preferredFamily = "msvc";
+      cxxPolicy.version = cxxPolicy.version ?? "default";
     } else if (payload.compilerPreference === "mingw") {
       cxxPolicy.mode = cxxPolicy.mode ?? "managed";
       cxxPolicy.preferredFamily = "mingw";
       cxxPolicy.version = cxxPolicy.version ?? "latest";
+    } else if (payload.compilerPreference === "clang") {
+      const defaultMode = hostAdapter.getDefaultToolMode("cxx", "clang");
+      cxxPolicy.mode = cxxPolicy.mode ?? defaultMode;
+      cxxPolicy.preferredFamily = "clang";
+      cxxPolicy.version =
+        cxxPolicy.version ?? (cxxPolicy.mode === "managed" ? "latest" : "default");
     }
 
     if (payload.msvcInstallationPath?.trim()) {

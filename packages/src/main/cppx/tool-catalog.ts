@@ -82,6 +82,16 @@ const TOOL_CATALOG: ToolCatalogEntry[] = [
     compilerFamily: "mingw"
   },
   {
+    id: "conan-latest-windows-x64",
+    tool: "conan",
+    platform: "win32",
+    arch: "x64",
+    sourceKind: "catalog-github-release",
+    executable: getExecutableName("win32", "conan"),
+    repoUrl: "https://api.github.com/repos/conan-io/conan/releases?per_page=20",
+    assetPatterns: ["^conan-.*-windows-x86_64\\.zip$"]
+  },
+  {
     id: "vcpkg-2026.03.18-darwin-x64",
     tool: "vcpkg",
     platform: "darwin",
@@ -256,7 +266,7 @@ export function resolveToolCatalogEntry(
     return exact;
   }
 
-  if (tool === "cxx") {
+  if (fallback.sourceKind === "catalog-github-release") {
     return {
       ...fallback,
       version: normalizedVersion

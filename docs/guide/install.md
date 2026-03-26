@@ -10,15 +10,14 @@
 ## Basic command
 
 ```bash
-cd packages
-npm run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools
 ```
 
 ## Support matrix
 
 | Host | Default backend | CMake / Ninja | vcpkg | conan | C++ compiler |
 |---|---|---|---|---|---|
-| Windows x64 | `vcpkg` | `managed` | `managed` | `system` | `managed` (MinGW) or `system` (MSVC) |
+| Windows x64 | `vcpkg` | `managed` | `managed` | `managed` | `managed` (MinGW) or `system` (MSVC) |
 | macOS 14+ | `none` | `managed` | `managed` | `managed` | `managed` (Homebrew llvm) |
 | Ubuntu 24.04 | `none` | `managed` | `managed` | `managed` (`pipx`) | `managed` (`clang++` via `apt`) |
 | Other Linux | `none` | `system` | `system` | `system` | `system` |
@@ -27,9 +26,9 @@ npm run cppx -- install-tools
 
 ### Windows
 
-- `cppx` downloads verified archives for `cmake`, `ninja`, `vcpkg`, and the managed MinGW toolchain.
+- `cppx` downloads verified archives for `cmake`, `ninja`, `vcpkg`, `conan`, and the managed MinGW toolchain.
 - MSVC remains a detected system toolchain.
-- `conan` remains a system prerequisite.
+- Conan uses the official Windows release zip with checksum verification.
 
 ### macOS 14+
 
@@ -85,39 +84,38 @@ On Ubuntu 24.04, provider ownership is split by tool:
 ### Windows with managed MinGW
 
 ```bash
-npm run cppx -- install-tools --compiler mingw
+npm --prefix packages run cppx -- install-tools --compiler mingw
 ```
 
 ### Windows with system MSVC
 
 ```bash
-npm run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
+npm --prefix packages run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
 ```
 
 ### macOS 14+ managed host bootstrap
 
 ```bash
-npm run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools
 ```
 
 ### Ubuntu 24.04 managed host bootstrap
 
 ```bash
-npm run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools
 ```
 
 ### Unsupported Linux system detection
 
 ```bash
-npm run cppx -- install-tools
+npm --prefix packages run cppx -- install-tools
 ```
 
 ## Validation
 
 ```bash
-cd packages
-npm run test
-npm run smoke:native
+npm --prefix packages run test
+npm --prefix packages run smoke:native
 ```
 
 `smoke:native` verifies the current host can complete the `init -> build -> run -> test -> pack` flow.

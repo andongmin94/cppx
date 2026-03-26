@@ -7,7 +7,7 @@
   | "test"
   | "pack";
 
-export type CompilerPreference = "mingw" | "msvc";
+export type CompilerPreference = "clang" | "mingw" | "msvc";
 export type ToolInstallMode = "managed" | "system";
 export type DependencyBackend = "vcpkg" | "conan" | "none";
 export type ToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
