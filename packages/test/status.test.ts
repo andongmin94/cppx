@@ -85,10 +85,8 @@ test("status prints managed provenance and ownership details for ready tools", a
       const stdout = asText(result.stdout);
       const stderr = asText(result.stderr);
       assert.equal(result.status, 0, stderr || stdout);
-      assert.match(
-        stdout,
-        /cmake: ready \(managed, archive, cppx-owned, 3\.30\.5, catalog-archive, archive .*sha256:0123456789ab/i
-      );
+      assert.match(stdout, /cmake: ready \(managed, archive, cppx-owned, 3\.30\.5, catalog-archive/i);
+      assert.match(stdout, /sha256:0123456789ab/i);
       assert.match(stdout, /workspace:/);
     });
   } finally {

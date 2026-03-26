@@ -109,6 +109,11 @@ async function readLinuxOsRelease(
     return parseLinuxOsRelease(context.linuxOsReleaseText);
   }
 
+  const envOverride = process.env.CPPX_LINUX_OS_RELEASE?.trim();
+  if (envOverride) {
+    return parseLinuxOsRelease(envOverride);
+  }
+
   try {
     const content = await fs.readFile("/etc/os-release", "utf-8");
     return parseLinuxOsRelease(content);

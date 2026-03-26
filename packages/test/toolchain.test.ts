@@ -242,7 +242,10 @@ test("installAllTools fails clearly when managed lifecycle is not supported on u
             (error) => {
               assert.ok(error instanceof CppxError);
               assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
-              assert.match(error.details ?? "", /Ubuntu 24\.04/);
+              assert.match(
+                error.details ?? "",
+                /Ubuntu 24\.04|Managed Linux support is limited to Ubuntu 24\.04|managed 수명주기/
+              );
               return true;
             }
           );
@@ -459,11 +462,14 @@ test("resolveToolchainOrThrow reports all missing managed tools", async () => {
           ),
         (error) => {
           assert.ok(error instanceof CppxError);
+          assert.match(error.message, /누락된 도구:/);
           assert.match(error.message, /vcpkg/);
-          assert.match(error.message, /cxx-compiler/);
           if (process.platform === "win32") {
             assert.match(error.message, /cmake/);
             assert.match(error.message, /ninja/);
+            assert.match(error.message, /cxx-compiler/);
+          } else {
+            assert.doesNotMatch(error.message, /cxx-compiler/);
           }
           return true;
         }

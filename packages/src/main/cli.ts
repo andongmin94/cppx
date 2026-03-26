@@ -37,6 +37,7 @@ function printLog(entry: LogEntry): void {
 const service = new CppxService(printLog);
 const program = new Command();
 const hostAdapter = getHostAdapter();
+const REPO_CPPX_COMMAND = "npm --prefix packages run cppx --";
 
 interface WorkspaceConfigSummary {
   exists: boolean;
@@ -84,9 +85,9 @@ function printInitGuidance(workspaceRaw: string, config: WorkspaceConfigSummary)
       `config: schema v${config.schemaVersion ?? "unknown"}, backend=${config.dependencyBackend ?? hostAdapter.getDefaultDependencyBackend()}, target=${config.targetName ?? "unknown"}`
     );
   }
-  console.log(`next: npm run cppx -- doctor ${displayPath}`);
-  console.log(`next: npm run cppx -- build ${displayPath}`);
-  console.log(`next: npm run cppx -- run ${displayPath}`);
+  console.log(`next: ${REPO_CPPX_COMMAND} doctor ${displayPath}`);
+  console.log(`next: ${REPO_CPPX_COMMAND} build ${displayPath}`);
+  console.log(`next: ${REPO_CPPX_COMMAND} run ${displayPath}`);
   if (config.dependencyBackend === "none") {
     console.log(
       `hint: dependency_backend = "none"이라 cppx add는 비활성화됩니다. 의존성이 필요하면 --backend conan 또는 --backend vcpkg를 선택하세요.`
@@ -122,12 +123,12 @@ function printStatusGuidance(
 
   if (missing.length > 0) {
     console.log(`hint: 누락된 도구가 있습니다: ${missing.join(", ")}`);
-    console.log(`hint: npm run cppx -- doctor ${quoteForCommand(workspace)}`);
-    console.log("hint: npm run cppx -- install-tools");
+    console.log(`hint: ${REPO_CPPX_COMMAND} doctor ${quoteForCommand(workspace)}`);
+    console.log(`hint: ${REPO_CPPX_COMMAND} install-tools`);
     return;
   }
 
-  console.log(`hint: 전체 진단이 필요하면 npm run cppx -- doctor ${quoteForCommand(workspace)}`);
+  console.log(`hint: 전체 진단이 필요하면 ${REPO_CPPX_COMMAND} doctor ${quoteForCommand(workspace)}`);
 }
 
 function printDoctorReport(report: Awaited<ReturnType<typeof runDoctor>>): void {
@@ -311,7 +312,7 @@ program
     } catch (error) {
       console.log("");
       console.log(
-        `hint: workspace 설정을 읽는 중 오류가 발생했습니다. 전체 진단은 npm run cppx -- doctor ${quoteForCommand(path.resolve(resolvedWorkspace))}`
+        `hint: workspace 설정을 읽는 중 오류가 발생했습니다. 전체 진단은 ${REPO_CPPX_COMMAND} doctor ${quoteForCommand(path.resolve(resolvedWorkspace))}`
       );
       if (error instanceof Error && error.message.trim().length > 0) {
         console.log(`hint: ${error.message}`);

@@ -26,6 +26,7 @@ import {
 } from "./workspace-layout";
 
 const hostAdapter = getHostAdapter();
+const REPO_CPPX_COMMAND = "npm --prefix packages run cppx --";
 
 export type DoctorSeverity = "ok" | "warning" | "blocking";
 
@@ -168,7 +169,7 @@ function getSystemInstallHint(): string {
     return "system 모드를 쓸 때는 `cmake`, `ninja`, `clang++` 또는 `g++`, 필요하면 `conan`까지 PATH에 보여야 합니다. 예: `sudo apt-get install cmake ninja-build build-essential`";
   }
 
-  return "`npm run cppx -- install-tools`로 관리형 도구를 준비하거나 system 모드 도구 경로를 확인하세요.";
+  return `\`${REPO_CPPX_COMMAND} install-tools\`로 관리형 도구를 준비하거나 system 모드 도구 경로를 확인하세요.`;
 }
 
 function collectMissingToolModes(snapshot: ToolResolutionSnapshot): Array<"managed" | "system"> {
@@ -214,7 +215,7 @@ export async function runDoctor(
     });
     addNextStep(
       nextSteps,
-      `npm run cppx -- init ${quoteForCommand(workspace)} --name ${path.basename(workspace)}`
+      `${REPO_CPPX_COMMAND} init ${quoteForCommand(workspace)} --name ${path.basename(workspace)}`
     );
   } else if (!configSummary.readable) {
     checks.push({
@@ -442,7 +443,7 @@ export async function runDoctor(
 
   if (missingToolModes.length > 0) {
     if (missingToolDetails.some((detail) => detail.capabilities?.install)) {
-      addNextStep(nextSteps, "npm run cppx -- install-tools");
+      addNextStep(nextSteps, `${REPO_CPPX_COMMAND} install-tools`);
     }
 
     if (missingToolModes.includes("system")) {
@@ -465,8 +466,8 @@ export async function runDoctor(
   const warningCount = checks.filter((check) => check.severity === "warning").length;
 
   if (blockerCount === 0 && configSummary.exists && configSummary.readable) {
-    addNextStep(nextSteps, `npm run cppx -- build ${quoteForCommand(workspace)}`);
-    addNextStep(nextSteps, `npm run cppx -- run ${quoteForCommand(workspace)}`);
+    addNextStep(nextSteps, `${REPO_CPPX_COMMAND} build ${quoteForCommand(workspace)}`);
+    addNextStep(nextSteps, `${REPO_CPPX_COMMAND} run ${quoteForCommand(workspace)}`);
   }
 
   return {
