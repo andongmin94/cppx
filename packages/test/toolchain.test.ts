@@ -464,12 +464,14 @@ test("resolveToolchainOrThrow reports all missing managed tools", async () => {
           assert.ok(error instanceof CppxError);
           assert.match(error.message, /누락된 도구:/);
           assert.match(error.message, /vcpkg/);
+          if (process.platform === "linux") {
+            assert.doesNotMatch(error.message, /cxx-compiler/);
+          } else {
+            assert.match(error.message, /cxx-compiler/);
+          }
           if (process.platform === "win32") {
             assert.match(error.message, /cmake/);
             assert.match(error.message, /ninja/);
-            assert.match(error.message, /cxx-compiler/);
-          } else {
-            assert.doesNotMatch(error.message, /cxx-compiler/);
           }
           return true;
         }
