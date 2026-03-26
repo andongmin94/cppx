@@ -1250,31 +1250,28 @@ function ensureSupportedAptVersionPolicy(
 
 async function runAptCommand(args: string[], logger: CppxLogger): Promise<void> {
   const direct = await resolveAptExecutable();
-  if (direct) {
-    try {
-      await runSpawn(
-        {
-          action: "install-tools",
-          command: direct,
-          args
-        },
-        logger
-      );
-      return;
-    } catch (error) {
-      const details = toMessage(error).toLowerCase();
-      if (
-        !details.includes("permission denied") &&
-        !details.includes("could not open lock file") &&
-        !details.includes("are you root")
-      ) {
-        throw error;
-      }
-    }
+  if (!direct) {
+    throw new CppxError(
+      "apt-get을 찾지 못했습니다.",
+      "Ubuntu 24.04 managed 도구 설치를 사용하려면 apt-get이 필요합니다."
+    );
+  }
+
+  const needsPrivilege = typeof process.getuid === "function" && process.getuid() !== 0;
+  if (!needsPrivilege) {
+    await runSpawn(
+      {
+        action: "install-tools",
+        command: direct,
+        args
+      },
+      logger
+    );
+    return;
   }
 
   const sudoExecutable = await resolveExecutableFromPath(["sudo"]);
-  if (!sudoExecutable || !direct) {
+  if (!sudoExecutable) {
     throw new CppxError(
       "apt 실행 권한을 확보하지 못했습니다.",
       "root 권한으로 실행하거나 passwordless sudo가 필요합니다."

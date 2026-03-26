@@ -65,7 +65,14 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
         presets.configurePresets.map((preset: any) => preset.name),
         ["asan-x64", "release-lto"]
       );
-      assert.match(presets.configurePresets[0].toolchainFile, /conan_toolchain\.cmake/);
+      assert.equal(
+        presets.configurePresets[0].toolchainFile,
+        "${sourceDir}/build/Debug/generators/conan_toolchain.cmake"
+      );
+      assert.equal(
+        presets.configurePresets[1].toolchainFile,
+        "${sourceDir}/build/Release/generators/conan_toolchain.cmake"
+      );
       assert.equal(
         presets.configurePresets[0].cacheVariables.CMAKE_BUILD_TYPE,
         "Debug"

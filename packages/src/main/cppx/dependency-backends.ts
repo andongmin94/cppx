@@ -38,7 +38,7 @@ export interface DependencyBackendAdapter {
   getPresetIntegration(
     config: NormalizedProjectConfig,
     toolchain: Toolchain,
-    preset: { targetTriplet?: string }
+    preset: { targetTriplet?: string; buildType?: string }
   ): BackendPresetIntegration;
   getBuildEnv(
     config: NormalizedProjectConfig,
@@ -150,9 +150,10 @@ const conanBackend: DependencyBackendAdapter = {
     return ["vcpkg.json"];
   },
 
-  getPresetIntegration() {
+  getPresetIntegration(_config, _toolchain, preset) {
+    const buildType = preset.buildType ?? "Release";
     return {
-      toolchainFile: "${sourceDir}/conan_toolchain.cmake",
+      toolchainFile: `\${sourceDir}/build/${buildType}/generators/conan_toolchain.cmake`,
       cacheVariables: {},
       environment: {}
     };
