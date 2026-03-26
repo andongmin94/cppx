@@ -94,6 +94,7 @@ export interface Toolchain {
   cmake: string;
   ninja: string;
   vcpkg?: string;
+  conan?: string;
   cxx: string;
   envPath: string[];
   compilerFamily: CompilerFamily;

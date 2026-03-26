@@ -187,10 +187,14 @@ const conanBackend: DependencyBackendAdapter = {
   },
 
   async prepareForConfigure(_config, _toolchain, generatedRoot, logger, preset) {
+    if (!_toolchain.conan) {
+      throw new CppxError("conan backend를 사용하려면 conan 실행 파일이 필요합니다.");
+    }
+
     await runSpawn(
       {
         action: "build",
-        command: "conan",
+        command: _toolchain.conan,
         args: ["profile", "detect", "--force"],
         cwd: generatedRoot
       },
@@ -199,7 +203,7 @@ const conanBackend: DependencyBackendAdapter = {
     await runSpawn(
       {
         action: "build",
-        command: "conan",
+        command: _toolchain.conan,
         args: [
           "install",
           ".",
