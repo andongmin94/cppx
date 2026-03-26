@@ -50,7 +50,8 @@ export interface DependencyBackendAdapter {
     config: NormalizedProjectConfig,
     toolchain: Toolchain,
     generatedRoot: string,
-    logger: CppxLogger
+    logger: CppxLogger,
+    preset: { targetTriplet?: string; buildType?: string }
   ): Promise<void>;
 }
 
@@ -185,7 +186,7 @@ const conanBackend: DependencyBackendAdapter = {
     };
   },
 
-  async prepareForConfigure(_config, _toolchain, generatedRoot, logger) {
+  async prepareForConfigure(_config, _toolchain, generatedRoot, logger, preset) {
     await runSpawn(
       {
         action: "build",
@@ -199,7 +200,15 @@ const conanBackend: DependencyBackendAdapter = {
       {
         action: "build",
         command: "conan",
-        args: ["install", ".", "--output-folder", ".", "--build", "missing"],
+        args: [
+          "install",
+          ".",
+          "--output-folder",
+          ".",
+          "--build",
+          "missing",
+          ...(preset.buildType ? ["-s", `build_type=${preset.buildType}`] : [])
+        ],
         cwd: generatedRoot
       },
       logger

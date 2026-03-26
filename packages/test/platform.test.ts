@@ -74,7 +74,7 @@ test("linux host adapter provides native defaults and commands", async () => {
 
       const lookup = adapter.getExecutableLookupCommand("cmake");
       assert.equal(lookup.command, "which");
-      assert.deepEqual(lookup.args, ["cmake"]);
+      assert.deepEqual(lookup.args, ["-a", "cmake"]);
 
       const bootstrap = adapter.getVcpkgBootstrapCommand("tools");
       assert.equal(bootstrap.command, "sh");

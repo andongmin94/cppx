@@ -875,6 +875,35 @@ async function resolveExecutableFromPath(candidates: string[]): Promise<string |
   return null;
 }
 
+async function resolveExecutableCandidatesFromPath(candidates: string[]): Promise<string[]> {
+  const matches = new Set<string>();
+  const directPathMatch = await resolveExecutableFromPathEntries(candidates);
+  if (directPathMatch) {
+    matches.add(directPathMatch);
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const lookupCommand = hostAdapter.getExecutableLookupCommand(candidate);
+      const { stdout } = await execFile(lookupCommand.command, lookupCommand.args, {
+        windowsHide: true
+      });
+      for (const resolved of stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)) {
+        if (await pathExists(resolved)) {
+          matches.add(resolved);
+        }
+      }
+    } catch {
+      // Ignore missing candidates and continue.
+    }
+  }
+
+  return [...matches];
+}
+
 async function resolveExecutableFromPathEntries(candidates: string[]): Promise<string | null> {
   const pathValue = process.env.PATH;
   if (!pathValue) {
@@ -1216,8 +1245,10 @@ async function resolveAptToolExecutable(
   aptExecutable: string
 ): Promise<{ executable: string; root: string; version: string; compilerFamily?: CompilerFamily } | null> {
   const spec = getAptToolSpec(tool);
-  const executable = await resolveExecutableFromPath([hostAdapter.getExecutableName(spec.executable)]);
-  if (!executable || !isPathManagedByApt(executable)) {
+  const executable = (
+    await resolveExecutableCandidatesFromPath([hostAdapter.getExecutableName(spec.executable)])
+  ).find((candidate) => isPathManagedByApt(candidate));
+  if (!executable) {
     return null;
   }
 

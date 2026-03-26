@@ -729,7 +729,8 @@ export async function buildWithPreset(
     config,
     toolchain,
     generatedRoot,
-    logger
+    logger,
+    presetConfig
   );
 
   logger.info("build", `컴파일러: ${toolchain.cxx}`);
@@ -813,13 +814,14 @@ export async function testPreset(
   }
 
   const config = await readProjectConfig(workspace);
-  getPresetConfigOrThrow(config, preset);
+  const presetConfig = getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
   await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
     config,
     toolchain,
     getWorkspaceGeneratedRoot(workspace),
-    logger
+    logger,
+    presetConfig
   );
 
   await runSpawn(
@@ -847,13 +849,14 @@ export async function packagePreset(
   }
 
   const config = await readProjectConfig(workspace);
-  getPresetConfigOrThrow(config, preset);
+  const presetConfig = getPresetConfigOrThrow(config, preset);
   await syncGeneratedFiles(workspace, config, toolchain);
   await getDependencyBackendAdapter(config.dependencyBackend).prepareForConfigure(
     config,
     toolchain,
     getWorkspaceGeneratedRoot(workspace),
-    logger
+    logger,
+    presetConfig
   );
 
   await runSpawn(

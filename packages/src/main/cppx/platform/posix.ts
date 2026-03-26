@@ -193,7 +193,7 @@ function createPosixHostAdapter(platform: Extract<HostPlatform, "darwin" | "linu
     },
 
     getExecutableLookupCommand(candidate: string): HostCommand {
-      return makeCommand("which", [candidate]);
+      return makeCommand("which", ["-a", candidate]);
     },
 
     getArchiveExtractCommand(archivePath: string, destination: string): HostCommand {
