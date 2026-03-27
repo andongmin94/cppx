@@ -349,12 +349,200 @@ test("getToolStatus and resolveToolchainOrThrow surface pipx-managed conan on su
           assert.equal(toolchain.cmake, cmake);
           assert.equal(toolchain.ninja, ninja);
           assert.equal(toolchain.cxx, cxx);
+          assert.equal(toolchain.compilerFamily, "clang");
           assert.deepEqual(toolchain.envPath, [
             path.dirname(cmake),
             path.dirname(ninja),
             path.dirname(conan),
             path.dirname(cxx)
           ]);
+        });
+      }
+    );
+  } finally {
+    await removeDir(hostRoot);
+  }
+});
+
+test("resolveToolchainOrThrow rejects stale managed archive versions when an exact version is requested", async () => {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const hostRoot = await createTempDir("managed-exact-mismatch");
+  const { logger } = createLogger();
+  const hostAdapter = getHostAdapter();
+
+  try {
+    await withHostDataRoot(hostRoot, async () => {
+      const cmake = path.join(getToolRoot("cmake"), "bin", hostAdapter.getExecutableName("cmake"));
+      const ninja = path.join(getToolRoot("ninja"), hostAdapter.getExecutableName("ninja"));
+      const vcpkg = path.join(getToolRoot("vcpkg"), hostAdapter.getExecutableName("vcpkg"));
+      const cxx = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("clang++"));
+
+      await writeExecutable(cmake);
+      await writeExecutable(ninja);
+      await writeExecutable(vcpkg);
+      await writeExecutable(cxx);
+
+      await upsertToolRecord({
+        name: "cmake",
+        executable: cmake,
+        root: getToolRoot("cmake"),
+        version: "3.30.5",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-archive",
+        provider: "archive",
+        ownership: "cppx"
+      });
+      await upsertToolRecord({
+        name: "ninja",
+        executable: ninja,
+        root: getToolRoot("ninja"),
+        version: "1.12.1",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-archive",
+        provider: "archive",
+        ownership: "cppx"
+      });
+      await upsertToolRecord({
+        name: "vcpkg",
+        executable: vcpkg,
+        root: getToolRoot("vcpkg"),
+        version: "2026.03.18",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-archive",
+        provider: "archive",
+        ownership: "cppx"
+      });
+      await upsertToolRecord({
+        name: "cxx",
+        executable: cxx,
+        root: getToolRoot("cxx"),
+        version: "20.1.7",
+        installedAt: "2026-03-26T00:00:00.000Z",
+        mode: "managed",
+        sourceKind: "catalog-github-release",
+        provider: "archive",
+        ownership: "cppx",
+        compilerFamily: "mingw"
+      });
+
+      await assert.rejects(
+        () =>
+          resolveToolchainOrThrow(
+            logger,
+            {
+              cmake: { mode: "managed", version: "9.9.9" },
+              ninja: { mode: "managed", version: "default" },
+              vcpkg: { mode: "managed", version: "default" },
+              cxx: { mode: "managed", version: "latest", preferredFamily: "mingw" }
+            },
+            "vcpkg"
+          ),
+        (error) => {
+          assert.ok(error instanceof CppxError);
+          assert.match(error.message, /cmake/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await removeDir(hostRoot);
+  }
+});
+
+test("resolveToolchainOrThrow rejects mismatched pipx-managed conan when an exact version is requested", async () => {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const hostRoot = await createTempDir("linux-conan-exact-mismatch");
+  const { logger } = createLogger();
+  const hostAdapter = getHostAdapter();
+
+  try {
+    await withEnv(
+      "CPPX_LINUX_OS_RELEASE",
+      'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+      async () => {
+        await withHostDataRoot(hostRoot, async () => {
+          const cmake = path.join(getToolRoot("cmake"), "bin", hostAdapter.getExecutableName("cmake"));
+          const ninja = path.join(getToolRoot("ninja"), hostAdapter.getExecutableName("ninja"));
+          const conan = path.join(getToolRoot("conan"), "bin", hostAdapter.getExecutableName("conan"));
+          const cxx = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("clang++"));
+
+          await writeExecutable(cmake);
+          await writeExecutable(ninja);
+          await writeExecutable(conan);
+          await writeExecutable(cxx);
+
+          await upsertToolRecord({
+            name: "cmake",
+            executable: cmake,
+            root: getToolRoot("cmake"),
+            version: "4.3.0",
+            installedAt: "2026-03-26T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "catalog-archive",
+            provider: "archive",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "ninja",
+            executable: ninja,
+            root: getToolRoot("ninja"),
+            version: "1.12.1",
+            installedAt: "2026-03-26T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "catalog-archive",
+            provider: "archive",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "conan",
+            executable: conan,
+            root: getToolRoot("conan"),
+            version: "2.21.0",
+            installedAt: "2026-03-26T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "pipx-managed",
+            provider: "pipx",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "cxx",
+            executable: cxx,
+            root: getToolRoot("cxx"),
+            version: "18.1.3",
+            installedAt: "2026-03-26T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+
+          await assert.rejects(
+            () =>
+              resolveToolchainOrThrow(
+                logger,
+                {
+                  cmake: { mode: "managed", version: "default" },
+                  ninja: { mode: "managed", version: "default" },
+                  conan: { mode: "managed", version: "2.26.2" },
+                  cxx: { mode: "managed", version: "latest", preferredFamily: "clang" }
+                },
+                "conan"
+              ),
+            (error) => {
+              assert.ok(error instanceof CppxError);
+              assert.match(error.message, /conan/);
+              return true;
+            }
+          );
         });
       }
     );

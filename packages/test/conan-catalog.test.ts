@@ -4,7 +4,8 @@ import {
   DEFAULT_TOOL_VERSION_TOKEN,
   LATEST_TOOL_VERSION_TOKEN,
   getToolCatalogEntries,
-  resolveToolCatalogEntry
+  resolveToolCatalogEntry,
+  resolveToolCatalogEntryForTarget
 } from "../src/main/cppx/tool-catalog";
 
 const hasManagedConanCatalog = getToolCatalogEntries("conan").length > 0;
@@ -40,4 +41,12 @@ test("conan exact versions reuse the GitHub release catalog entry", () => {
   assert.equal(exact.id, "conan-latest-windows-x64");
   assert.equal(exact.version, "2.26.2");
   assert.equal(exact.sourceKind, "catalog-github-release");
+});
+
+test("macOS conan exact versions reuse the GitHub release catalog entry", () => {
+  const exact = resolveToolCatalogEntryForTarget("darwin", "arm64", "conan", "2.26.2");
+  assert.equal(exact.id, "conan-latest-darwin-arm64");
+  assert.equal(exact.version, "2.26.2");
+  assert.equal(exact.sourceKind, "catalog-github-release");
+  assert.deepEqual(exact.assetPatterns, ["^conan-.*-macos-arm64\\.tgz$"]);
 });

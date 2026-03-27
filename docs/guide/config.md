@@ -118,6 +118,14 @@ Shared keys:
 | `mode` | `managed` or `system` |
 | `version` | `default`, `latest`, or a pinned version |
 
+Pinned version behavior:
+
+- `cmake`, `ninja`, `vcpkg`, and `conan` support managed exact pins on official hosts
+- `vcpkg` exact versions are limited to catalog-listed releases
+- macOS exact pins for `cmake`, `ninja`, and `conan` use archive/release providers instead of default Homebrew flows
+- Ubuntu 24.04 exact pins for `cmake` and `ninja` use archive providers, and `conan` exact pins use `pipx`
+- non-Windows managed `cxx` currently stays on floating defaults
+
 `[tools.cxx]` also accepts:
 
 | Key | Meaning |

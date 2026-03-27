@@ -62,33 +62,68 @@ function getSmokeCxxMode(toolMode: "managed" | "system"): "managed" | "system" {
   return toolMode;
 }
 
+function getSmokeVersion(
+  tool: "cmake" | "ninja" | "vcpkg" | "conan" | "cxx",
+  fallback: string
+): string {
+  const envKey = `CPPX_SMOKE_${tool.toUpperCase()}_VERSION`;
+  const raw = process.env[envKey]?.trim();
+  return raw && raw.length > 0 ? raw : fallback;
+}
+
 async function main(): Promise<void> {
   const logger = createLogger();
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "cppx-smoke-"));
   const dependencyBackend = getSmokeBackend();
   const toolMode = getSmokeToolMode();
   const cxxMode = getSmokeCxxMode(toolMode);
-  const toolPolicy = {
+  const cmakePolicy = {
     mode: toolMode,
-    version: toolMode === "managed" ? "default" : "latest"
+    version: getSmokeVersion("cmake", toolMode === "managed" ? "default" : "latest")
+  } as const;
+  const ninjaPolicy = {
+    mode: toolMode,
+    version: getSmokeVersion("ninja", toolMode === "managed" ? "default" : "latest")
+  } as const;
+  const vcpkgPolicy = {
+    mode: toolMode,
+    version: getSmokeVersion("vcpkg", toolMode === "managed" ? "default" : "latest")
+  } as const;
+  const conanPolicy = {
+    mode: toolMode,
+    version: getSmokeVersion("conan", toolMode === "managed" ? "default" : "latest")
   } as const;
   const cxxPolicy =
     process.platform === "win32"
       ? cxxMode === "managed"
-        ? { mode: "managed" as const, version: "latest", preferredFamily: "mingw" as const }
-        : { mode: "system" as const, version: "latest", preferredFamily: "msvc" as const }
+        ? {
+            mode: "managed" as const,
+            version: getSmokeVersion("cxx", "latest"),
+            preferredFamily: "mingw" as const
+          }
+        : {
+            mode: "system" as const,
+            version: getSmokeVersion("cxx", "latest"),
+            preferredFamily: "msvc" as const
+          }
       : {
           mode: cxxMode,
-          version: cxxMode === "managed" ? "latest" : "latest",
-          preferredFamily: "mingw" as const
+          version: getSmokeVersion("cxx", "latest"),
+          preferredFamily: "clang" as const
         };
   const toolPolicies = {
-    cmake: toolPolicy,
-    ninja: toolPolicy,
-    vcpkg: toolPolicy,
-    conan: toolPolicy,
+    cmake: cmakePolicy,
+    ninja: ninjaPolicy,
+    vcpkg: vcpkgPolicy,
+    conan: conanPolicy,
     cxx: cxxPolicy
   };
+
+  console.log(
+    `Smoke config: backend=${dependencyBackend}, toolMode=${toolMode}, cxxMode=${cxxMode}, ` +
+      `cmake=${toolPolicies.cmake.version}, ninja=${toolPolicies.ninja.version}, ` +
+      `vcpkg=${toolPolicies.vcpkg.version}, conan=${toolPolicies.conan.version}, cxx=${toolPolicies.cxx.version}`
+  );
 
   try {
     const toolchain =

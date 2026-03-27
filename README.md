@@ -25,6 +25,7 @@ Other Linux distributions remain best-effort and system-oriented until they are 
 - dependency backend selection: `vcpkg | conan | none`
 - compiler strategy selection
 - host tool preparation or detection
+- exact pinned versions for official-host managed non-compiler tools
 - project generation and generated build integration artifacts
 - the full `init -> add -> build -> run -> test -> pack` workflow
 - `status` and `doctor` guidance

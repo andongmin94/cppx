@@ -15,19 +15,31 @@ import type {
   RunCommandPayload,
   RunCommandResult,
   ToolLifecycleCapabilities,
-  ToolInstallMode,
-  ToolStatusDetail,
   ToolStatus
 } from "@shared/contracts";
+import {
+  BuildActionPanel
+} from "@renderer/components/cppx/build-action-panel";
+import {
+  CompilerChoiceDialog
+} from "@renderer/components/cppx/compiler-choice-dialog";
 import {
   getCompilerPreferenceLabel,
   getCompilerPreferenceOptions
 } from "@shared/compiler-display";
+import { LogsPanel } from "@renderer/components/cppx/logs-panel";
+import { PresetMatrixCard } from "@renderer/components/cppx/preset-matrix-card";
+import { ToolPolicyCard } from "@renderer/components/cppx/tool-policy-card";
+import { ToolchainStatusCard } from "@renderer/components/cppx/toolchain-status-card";
 import {
-  formatHostSupportSummary,
-  formatLifecycleSummary,
-  getToolOwnershipLabel
-} from "@shared/tooling-display";
+  getDefaultCompilerPreference,
+  INSTALL_TOOL_ORDER,
+  supportsMsvcInstallationPath,
+  type EditableToolId,
+  type InstallProgressStatus,
+  type InstallToolKey,
+  type InstallToolProgress
+} from "@renderer/components/cppx/tooling";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -39,7 +51,6 @@ import {
 } from "@renderer/components/ui/card";
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
-import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -49,17 +60,9 @@ import {
 } from "@renderer/components/ui/select";
 import { Separator } from "@renderer/components/ui/separator";
 import {
-  AlertTriangle,
-  CheckCircle2,
   FolderOpen,
   Hammer,
-  Loader2,
-  PackagePlus,
-  Play,
-  Plus,
-  RefreshCcw,
   Terminal,
-  Trash2,
   Wrench,
   type LucideIcon
 } from "lucide-react";
@@ -73,8 +76,6 @@ const initialToolStatus: ToolStatus = {
 };
 
 type ViewId = "workspace" | "build" | "logs";
-type InstallToolKey = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
-type InstallProgressStatus = "idle" | "running" | "success" | "error";
 type InitButtonStatus = "idle" | "running" | "success" | "error";
 type InstallButtonStatus = "idle" | "running" | "success" | "error";
 type StatusToastTone = "info" | "success" | "error";
@@ -82,17 +83,11 @@ type CompilerChoiceDecision =
   | { kind: "msvc"; installationPath: string }
   | { kind: "mingw" }
   | { kind: "close" };
-type EditableToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 
 interface StatusToastState {
   message: string;
   tone: StatusToastTone;
   visible: boolean;
-}
-
-interface InstallToolProgress {
-  percent: number;
-  status: InstallProgressStatus;
 }
 
 interface InstallProgressState {
@@ -118,25 +113,11 @@ const viewItems: {
   { id: "logs", label: "로그", icon: Terminal }
 ];
 
-const INSTALL_TOOL_ORDER: InstallToolKey[] = ["cmake", "ninja", "vcpkg", "conan", "cxx"];
-const EDITABLE_TOOL_IDS: EditableToolId[] = ["cmake", "ninja", "vcpkg", "conan", "cxx"];
-const EMPTY_BUILD_TYPE = "__none__";
 const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = [
   { value: "vcpkg", label: "vcpkg" },
   { value: "conan", label: "conan" },
   { value: "none", label: "none" }
 ];
-const toolModeOptions: { value: ToolInstallMode; label: string }[] = [
-  { value: "managed", label: "managed" },
-  { value: "system", label: "system" }
-];
-const toolLabels: Record<EditableToolId, string> = {
-  cmake: "CMake",
-  ninja: "Ninja",
-  vcpkg: "vcpkg",
-  conan: "conan",
-  cxx: "C++"
-};
 
 const INSTALL_TOOL_DONE_PATTERNS: Record<InstallToolKey, string[]> = {
   cmake: ["cmake 설치됨", "cmake 이미 설치됨"],
@@ -376,22 +357,6 @@ function updateInstallProgressFromLog(
   return next;
 }
 
-function levelClass(level: LogEntry["level"]): string {
-  switch (level) {
-    case "error":
-    case "stderr":
-      return "text-red-600";
-    case "warn":
-      return "text-amber-600";
-    case "success":
-      return "text-emerald-600";
-    case "stdout":
-      return "text-slate-700";
-    default:
-      return "text-slate-900";
-  }
-}
-
 function toListInput(values: string[]): string {
   return values.join(", ");
 }
@@ -409,11 +374,19 @@ function toErrorMessage(error: unknown): string {
   return "알 수 없는 오류가 발생했습니다.";
 }
 
-function getDefaultCompilerPreference(platform: HostPlatformPayload): CompilerPreference {
-  return platform === "win32" ? "mingw" : "clang";
+function getMsvcInstallationPathOverride(
+  platform: HostPlatformPayload,
+  compilerPreference: CompilerPreference | undefined,
+  rawValue: string | undefined
+): string | undefined {
+  const trimmed = rawValue?.trim();
+  if (!trimmed || !supportsMsvcInstallationPath(platform, compilerPreference)) {
+    return undefined;
+  }
+  return trimmed;
 }
 
-function createFallbackToolPolicies(
+function createLoadingToolPolicies(
   platform: HostPlatformPayload
 ): Required<ProjectToolPoliciesPayload> {
   const compilerFamily = getDefaultCompilerPreference(platform);
@@ -527,13 +500,13 @@ function cloneToolPolicies(
   };
 }
 
-function createFallbackHostDefaults(): HostDefaultsPayload {
+function createLoadingHostDefaults(): HostDefaultsPayload {
   const platform = detectRendererPlatform();
   return {
     platform,
     defaultPreset: `debug-${detectRendererArch()}`,
     dependencyBackend: "none",
-    toolPolicies: createFallbackToolPolicies(platform),
+    toolPolicies: createLoadingToolPolicies(platform),
     hostSupport: createLoadingHostSupport(platform),
     toolCapabilities: createLoadingToolCapabilities()
   };
@@ -541,7 +514,7 @@ function createFallbackHostDefaults(): HostDefaultsPayload {
 
 function toToolPolicyState(
   config: ProjectConfigPayload,
-  defaults: HostDefaultsPayload = createFallbackHostDefaults()
+  defaults: HostDefaultsPayload = createLoadingHostDefaults()
 ): Required<ProjectToolPoliciesPayload> {
   const compilerFamily =
     config.tools?.cxx?.preferredFamily ??
@@ -579,7 +552,8 @@ function toToolPolicyState(
 }
 
 const toToolPoliciesPayload = (
-  toolPolicies: Required<ProjectToolPoliciesPayload>
+  toolPolicies: Required<ProjectToolPoliciesPayload>,
+  platform: HostPlatformPayload
 ): ProjectToolPoliciesPayload => ({
   cmake: {
     mode: toolPolicies.cmake.mode,
@@ -601,8 +575,18 @@ const toToolPoliciesPayload = (
     mode: toolPolicies.cxx.mode,
     version: toolPolicies.cxx.version,
     preferredFamily: toolPolicies.cxx.preferredFamily,
-    ...(toolPolicies.cxx.msvcInstallationPath?.trim()
-      ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+    ...(getMsvcInstallationPathOverride(
+      platform,
+      toolPolicies.cxx.preferredFamily,
+      toolPolicies.cxx.msvcInstallationPath
+    )
+      ? {
+          msvcInstallationPath: getMsvcInstallationPathOverride(
+            platform,
+            toolPolicies.cxx.preferredFamily,
+            toolPolicies.cxx.msvcInstallationPath
+          )
+        }
       : {})
   }
 });
@@ -624,24 +608,6 @@ function getDependencyDescription(backend: DependencyBackend): string {
     default:
       return "cppx add로 vcpkg 패키지를 등록합니다";
   }
-}
-
-function getToolStatusSummary(detail: ToolStatusDetail | undefined): string | null {
-  const parts = [
-    detail?.ready ? detail.mode : undefined,
-    detail?.provider,
-    detail?.ownership ? getToolOwnershipLabel(detail.ownership) : undefined,
-    detail?.ready ? detail.resolvedVersion ?? detail.requestedVersion : undefined,
-    detail?.ready ? detail.sourceKind : undefined,
-    detail?.capabilities ? formatLifecycleSummary(detail.capabilities) : undefined
-  ].filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-function getToolCapabilityNote(detail: ToolStatusDetail | undefined): string | null {
-  const note = detail?.capabilities?.note?.trim();
-  return note && note.length > 0 ? note : null;
 }
 
 function getInitButtonText(status: InitButtonStatus): string {
@@ -713,7 +679,7 @@ function getStatusToastClassName(tone: StatusToastTone): string {
 export default function App() {
   const cppx = (window as unknown as { cppx?: CppxApi }).cppx;
   const [hostDefaults, setHostDefaults] = useState<HostDefaultsPayload>(() =>
-    createFallbackHostDefaults()
+    createLoadingHostDefaults()
   );
   const [defaultRootPath, setDefaultRootPath] = useState("");
   const [workspace, setWorkspace] = useState("");
@@ -788,15 +754,20 @@ export default function App() {
     return options;
   }, [hostDefaults.platform, toolPolicies.cxx.preferredFamily]);
 
+  const requiredToolIds = useMemo(() => {
+    switch (dependencyBackend) {
+      case "vcpkg":
+        return ["cmake", "ninja", "vcpkg", "cxx"] as const;
+      case "conan":
+        return ["cmake", "ninja", "conan", "cxx"] as const;
+      default:
+        return ["cmake", "ninja", "cxx"] as const;
+    }
+  }, [dependencyBackend]);
+
   const readyToolCount = useMemo(() => {
-    const items = [
-      toolStatus.cmake,
-      toolStatus.ninja,
-      toolStatus.vcpkg,
-      toolStatus.cxx
-    ];
-    return items.filter(Boolean).length;
-  }, [toolStatus]);
+    return requiredToolIds.filter((tool) => toolStatus[tool]).length;
+  }, [requiredToolIds, toolStatus]);
 
   const selectedPresetConfig = useMemo(
     () => presetConfigs.find((item) => item.name === buildPreset),
@@ -900,9 +871,17 @@ export default function App() {
       .catch(() => setDefaultRootPath(""));
 
     void (async () => {
-      const resolvedHostDefaults = await cppx
-        .getHostDefaults()
-        .catch(() => createFallbackHostDefaults());
+      let resolvedHostDefaults: HostDefaultsPayload;
+      try {
+        resolvedHostDefaults = await cppx.getHostDefaults();
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "main process host capability contract를 불러오지 못했습니다.";
+        setBridgeError(message);
+        return;
+      }
       setHostDefaults({
         ...resolvedHostDefaults,
         toolPolicies: cloneToolPolicies(resolvedHostDefaults.toolPolicies)
@@ -1108,6 +1087,11 @@ export default function App() {
     try {
       const current = await cppx.getProjectConfig(workspace);
       const parsedCxxStandard = Number.parseInt(cxxStandardInput.trim(), 10);
+      const msvcInstallationPath = getMsvcInstallationPathOverride(
+        hostDefaults.platform,
+        toolPolicies.cxx.preferredFamily,
+        toolPolicies.cxx.msvcInstallationPath
+      );
       const updated: ProjectConfigPayload = {
         ...current,
         name: projectName.trim() || current.name,
@@ -1121,8 +1105,8 @@ export default function App() {
         dependencyBackend,
         compiler: {
           preferredFamily: toolPolicies.cxx.preferredFamily,
-          ...(toolPolicies.cxx.msvcInstallationPath?.trim()
-            ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+          ...(msvcInstallationPath
+            ? { msvcInstallationPath }
             : {})
         },
         tools: {
@@ -1142,8 +1126,8 @@ export default function App() {
             mode: toolPolicies.cxx.mode,
             version: toolPolicies.cxx.version?.trim() || current.tools?.cxx?.version || "latest",
             preferredFamily: toolPolicies.cxx.preferredFamily,
-            ...(toolPolicies.cxx.msvcInstallationPath?.trim()
-              ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
+            ...(msvcInstallationPath
+              ? { msvcInstallationPath }
               : {})
           }
         },
@@ -1249,7 +1233,11 @@ export default function App() {
     let payloadDependencyBackend: RunCommandPayload["dependencyBackend"];
     if (action === "install-tools") {
       compilerPreference = toolPolicies.cxx.preferredFamily;
-      msvcInstallationPath = toolPolicies.cxx.msvcInstallationPath?.trim() || undefined;
+      msvcInstallationPath = getMsvcInstallationPathOverride(
+        hostDefaults.platform,
+        compilerPreference,
+        toolPolicies.cxx.msvcInstallationPath
+      );
 
       if (compilerPreference === "msvc") {
         try {
@@ -1285,32 +1273,7 @@ export default function App() {
     }
 
     if (action === "install-tools" || action === "init") {
-      payloadToolPolicies = {
-        cmake: {
-          mode: toolPolicies.cmake.mode,
-          version: toolPolicies.cmake.version
-        },
-        ninja: {
-          mode: toolPolicies.ninja.mode,
-          version: toolPolicies.ninja.version
-        },
-        vcpkg: {
-          mode: toolPolicies.vcpkg.mode,
-          version: toolPolicies.vcpkg.version
-        },
-        conan: {
-          mode: toolPolicies.conan.mode,
-          version: toolPolicies.conan.version
-        },
-        cxx: {
-          mode: toolPolicies.cxx.mode,
-          version: toolPolicies.cxx.version,
-          preferredFamily: toolPolicies.cxx.preferredFamily,
-          ...(toolPolicies.cxx.msvcInstallationPath?.trim()
-            ? { msvcInstallationPath: toolPolicies.cxx.msvcInstallationPath.trim() }
-            : {})
-        }
-      };
+      payloadToolPolicies = toToolPoliciesPayload(toolPolicies, hostDefaults.platform);
       payloadDependencyBackend = dependencyBackend;
     }
 
@@ -1581,7 +1544,7 @@ export default function App() {
                   <CardHeader className="pb-3">
                     <CardTitle>프로젝트 / 백엔드 설정</CardTitle>
                     <CardDescription>
-                      schema v2 기준의 핵심 프로젝트 설정을 읽고 저장합니다
+                      schema v3 기준의 핵심 프로젝트 설정을 읽고 저장합니다
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -1653,104 +1616,14 @@ export default function App() {
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle>도구 정책</CardTitle>
-                    <CardDescription>
-                      managed / system 모드와 버전 정책을 GUI에서 직접 조정합니다
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {EDITABLE_TOOL_IDS.map((tool) => (
-                      <div
-                        key={tool}
-                        className="space-y-2 rounded-[10px] border border-border/70 bg-secondary/35 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <Label className="text-sm font-medium">{toolLabels[tool]}</Label>
-                          <span className="text-[11px] text-muted-foreground">
-                            {getToolStatusSummary(toolStatus.details?.[tool]) ?? "미확인"}
-                          </span>
-                        </div>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <Label className="text-xs">mode</Label>
-                            <Select
-                              value={toolPolicies[tool].mode ?? "managed"}
-                              onValueChange={(value) =>
-                                updateToolPolicy(tool, "mode", value)
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="mode 선택" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {toolModeOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs">version</Label>
-                            <Input
-                              value={toolPolicies[tool].version ?? ""}
-                              onChange={(event) =>
-                                updateToolPolicy(tool, "version", event.target.value)
-                              }
-                              placeholder={tool === "cxx" ? "latest / default" : "default / latest / exact"}
-                            />
-                          </div>
-                        </div>
-                        {tool === "cxx" && (
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">preferred_family</Label>
-                              <Select
-                                value={
-                                  toolPolicies.cxx.preferredFamily ??
-                                  getDefaultCompilerPreference(hostDefaults.platform)
-                                }
-                                onValueChange={(value) =>
-                                  updateToolPolicy("cxx", "preferredFamily", value)
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="컴파일러 선택" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {compilerFamilyOptions.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {hostDefaults.platform !== "win32" && (
-                                <p className="text-[11px] text-muted-foreground">
-                                  이 호스트에서는 Clang compiler model을 사용합니다.
-                                </p>
-                              )}
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs" htmlFor="msvc-path">msvc_installation_path</Label>
-                              <Input
-                                id="msvc-path"
-                                value={toolPolicies.cxx.msvcInstallationPath ?? ""}
-                                onChange={(event) =>
-                                  updateToolPolicy("cxx", "msvcInstallationPath", event.target.value)
-                                }
-                                placeholder="MSVC 사용 시 선택 경로를 저장"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
+                <ToolPolicyCard
+                  toolPolicies={toolPolicies}
+                  toolStatusDetails={toolStatus.details}
+                  hostPlatform={hostDefaults.platform}
+                  compilerFamilyOptions={compilerFamilyOptions}
+                  defaultCompilerPreference={getDefaultCompilerPreference(hostDefaults.platform)}
+                  onUpdateToolPolicy={updateToolPolicy}
+                />
               </div>
 
               <div className="grid min-w-0 gap-3 xl:grid-cols-2">
@@ -1882,447 +1755,76 @@ export default function App() {
                 </Card>
               </div>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle>프리셋 매트릭스</CardTitle>
-                  <CardDescription>
-                    data-driven preset 목록과 실행 가능 여부를 GUI에서 편집합니다
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button
-                      variant="secondary"
-                      onClick={addPresetConfig}
-                      disabled={busy}
-                      className="gap-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      프리셋 추가
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => void loadProjectConfig()}
-                      disabled={busy}
-                    >
-                      프리셋 다시 불러오기
-                    </Button>
-                  </div>
-                  {presetConfigs.length === 0 ? (
-                    <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-                      현재 로드된 프리셋이 없습니다. config를 저장하면 기본 프리셋이 다시 생성됩니다.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {presetConfigs.map((presetConfig, index) => (
-                        <div
-                          key={`${presetConfig.name}-${index}`}
-                          className="space-y-3 rounded-[10px] border border-border/70 bg-secondary/35 p-3"
-                        >
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">
-                                {presetConfig.displayName?.trim() || presetConfig.name || `preset-${index + 1}`}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                기본 선택 여부: {preset === presetConfig.name ? "예" : "아니오"}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => removePresetConfig(index)}
-                              disabled={busy}
-                              className="gap-2"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              삭제
-                            </Button>
-                          </div>
-                          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">name</Label>
-                              <Input
-                                value={presetConfig.name}
-                                onChange={(event) =>
-                                  updatePresetConfig(index, "name", event.target.value)
-                                }
-                                placeholder={`preset-${index + 1}`}
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">display_name</Label>
-                              <Input
-                                value={presetConfig.displayName ?? ""}
-                                onChange={(event) =>
-                                  updatePresetConfig(index, "displayName", event.target.value)
-                                }
-                                placeholder="Debug x64"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">build_type</Label>
-                              <Select
-                                value={presetConfig.buildType ?? EMPTY_BUILD_TYPE}
-                                onValueChange={(value) =>
-                                  updatePresetConfig(
-                                    index,
-                                    "buildType",
-                                    value === EMPTY_BUILD_TYPE ? "" : value
-                                  )
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="build type 선택" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={EMPTY_BUILD_TYPE}>지정 안 함</SelectItem>
-                                  <SelectItem value="Debug">Debug</SelectItem>
-                                  <SelectItem value="Release">Release</SelectItem>
-                                  <SelectItem value="RelWithDebInfo">RelWithDebInfo</SelectItem>
-                                  <SelectItem value="MinSizeRel">MinSizeRel</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">target_triplet</Label>
-                              <Input
-                                value={presetConfig.targetTriplet ?? ""}
-                                onChange={(event) =>
-                                  updatePresetConfig(index, "targetTriplet", event.target.value)
-                                }
-                                placeholder="비우면 상위 target_triplet 사용"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">runnable</Label>
-                              <Select
-                                value={presetConfig.runnable === false ? "false" : "true"}
-                                onValueChange={(value) =>
-                                  updatePresetConfig(index, "runnable", value === "true")
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="실행 가능 여부" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="true">true</SelectItem>
-                                  <SelectItem value="false">false</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">default target</Label>
-                              <p className="rounded-[10px] border border-border/70 bg-card px-3 py-2 text-xs text-muted-foreground">
-                                상위 설정: <span className="font-mono">{targetTriplet || "(비어 있음)"}</span>
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <PresetMatrixCard
+                busy={busy}
+                presetConfigs={presetConfigs}
+                selectedPreset={preset}
+                targetTriplet={targetTriplet}
+                onAddPreset={addPresetConfig}
+                onReloadPresets={() => void loadProjectConfig()}
+                onRemovePreset={removePresetConfig}
+                onUpdatePreset={updatePresetConfig}
+              />
             </section>
           )}
 
           {activeView === "build" && (
             <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Build / Run / Test / Pack</CardTitle>
-                  <CardDescription>
-                    빌드 명령 예시: <code className="font-mono">cppx build --preset {buildPreset || "(preset)"}</code>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>프리셋</Label>
-                    {presetConfigs.length > 0 ? (
-                      <Select
-                        value={buildPreset}
-                        onValueChange={setBuildPreset}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="프리셋 선택" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {presetConfigs.map((item, index) => (
-                            <SelectItem key={`${item.name}-${index}`} value={item.name}>
-                              {item.displayName?.trim() || item.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-                        먼저 config를 불러오거나 저장해서 프리셋 목록을 동기화하세요.
-                      </p>
-                    )}
-                    {selectedPresetConfig && (
-                      <p className="text-xs text-muted-foreground">
-                        target_triplet:{" "}
-                        <span className="font-mono">
-                          {selectedPresetConfig.targetTriplet?.trim() || targetTriplet || "(기본값 자동 결정)"}
-                        </span>
-                        {" · "}
-                        runnable:{" "}
-                        <span className="font-mono">
-                          {selectedPresetConfig.runnable === false ? "false" : "true"}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => void runAction("run")}
-                      disabled={busy || presetConfigs.length === 0 || selectedPresetConfig?.runnable === false}
-                      className="gap-2"
-                    >
-                      <Play className="h-4 w-4" />
-                      Run
-                    </Button>
-                    <Button
-                      onClick={() => void runAction("build")}
-                      disabled={busy || presetConfigs.length === 0}
-                      className="gap-2"
-                    >
-                      <Hammer className="h-4 w-4" />
-                      Build
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => void runAction("test")}
-                      disabled={busy || presetConfigs.length === 0}
-                    >
-                      Test
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => void runAction("pack")}
-                      disabled={busy || presetConfigs.length === 0}
-                    >
-                      Pack
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <BuildActionPanel
+                busy={busy}
+                buildPreset={buildPreset}
+                presetConfigs={presetConfigs}
+                selectedPresetConfig={selectedPresetConfig}
+                targetTriplet={targetTriplet}
+                onChangeBuildPreset={setBuildPreset}
+                onRun={() => void runAction("run")}
+                onBuild={() => void runAction("build")}
+                onTest={() => void runAction("test")}
+                onPack={() => void runAction("pack")}
+              />
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>툴체인 상태</CardTitle>
-                  <CardDescription>
-                    명령 실행 전 필수 도구 설치 여부를 확인합니다 ({readyToolCount}/{INSTALL_TOOL_ORDER.length} 준비됨)
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="rounded-[10px] border border-border/70 bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                    <p>{formatHostSupportSummary(hostDefaults.hostSupport)}</p>
-                    {hostDefaults.hostSupport.notes.map((note, index) => (
-                      <p key={`${note}-${index}`} className="mt-1">
-                        {note}
-                      </p>
-                    ))}
-                  </div>
-                  <div className="space-y-1.5">
-                    <ToolStatusRow
-                      name="CMake"
-                      ready={toolStatus.cmake}
-                      detail={toolStatus.details?.cmake}
-                      progress={installProgress.tools.cmake}
-                      showProgress={installProgress.status !== "idle"}
-                    />
-                    <ToolStatusRow
-                      name="Ninja"
-                      ready={toolStatus.ninja}
-                      detail={toolStatus.details?.ninja}
-                      progress={installProgress.tools.ninja}
-                      showProgress={installProgress.status !== "idle"}
-                    />
-                    <ToolStatusRow
-                      name="vcpkg"
-                      ready={toolStatus.vcpkg}
-                      detail={toolStatus.details?.vcpkg}
-                      progress={installProgress.tools.vcpkg}
-                      showProgress={installProgress.status !== "idle"}
-                    />
-                    <ToolStatusRow
-                      name="conan"
-                      ready={toolStatus.conan}
-                      detail={toolStatus.details?.conan}
-                      progress={installProgress.tools.conan}
-                      showProgress={installProgress.status !== "idle"}
-                    />
-                    <ToolStatusRow
-                      name="C++ 컴파일러"
-                      ready={toolStatus.cxx}
-                      detail={toolStatus.details?.cxx}
-                      progress={installProgress.tools.cxx}
-                      showProgress={installProgress.status !== "idle"}
-                    />
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button
-                      className={getInstallButtonClassName(installButtonStatus)}
-                      onClick={() => void runAction("install-tools")}
-                      disabled={busy}
-                    >
-                      {installButtonStatus === "running" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <PackagePlus className="h-4 w-4" />
-                      )}
-                      <span className="truncate">
-                        {getInstallButtonText(installButtonStatus, installProgress.stage)}
-                      </span>
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="w-full justify-center gap-2"
-                      onClick={() => cppx && void refreshToolStatus(cppx)}
-                      disabled={busy || !cppx}
-                    >
-                      <RefreshCcw className="h-4 w-4" />
-                      툴체인 다시 검사
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {hostDefaults.hostSupport.managedLifecycleReady ? (
-                      <>
-                        도구 누락 상태에서는 <code className="font-mono">install-tools</code>를 먼저 실행하는 것이 안전합니다.
-                      </>
-                    ) : (
-                      <>
-                        이 host에서는 일부 도구가 아직 system 설치를 먼저 필요로 합니다. 각 툴 행의 lifecycle 안내와 <code className="font-mono">doctor</code> 출력을 확인하세요.
-                      </>
-                    )}
-                  </p>
-                </CardContent>
-              </Card>
+              <ToolchainStatusCard
+                hostSupport={hostDefaults.hostSupport}
+                toolStatus={toolStatus}
+                installProgressTools={installProgress.tools}
+                showProgress={installProgress.status !== "idle"}
+                installButtonStatus={installButtonStatus}
+                installButtonText={getInstallButtonText(installButtonStatus, installProgress.stage)}
+                installButtonClassName={getInstallButtonClassName(installButtonStatus)}
+                readyToolCount={readyToolCount}
+                requiredToolCount={requiredToolIds.length}
+                busy={busy}
+                canRefresh={Boolean(cppx)}
+                onInstallTools={() => void runAction("install-tools")}
+                onRefresh={() => {
+                  if (cppx) {
+                    void refreshToolStatus(cppx);
+                  }
+                }}
+              />
             </section>
           )}
 
           {activeView === "logs" && (
-            <section>
-              <Card className="flex h-[max(320px,calc(100dvh-300px))] flex-col">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Terminal className="h-4 w-4" />
-                        실행 로그
-                      </CardTitle>
-                      <CardDescription>child_process.spawn 실시간 로그 스트림</CardDescription>
-                    </div>
-                    <div className="flex items-center">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setLogs([])}
-                        disabled={busy}
-                      >
-                        지우기
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="min-h-0 flex-1">
-                  <ScrollArea
-                    ref={logsScrollAreaRef}
-                    className="h-full rounded-[10px] border bg-card p-3 font-mono text-xs"
-                  >
-                    <div className="space-y-2">
-                      {logs.length === 0 ? (
-                        <p className="text-muted-foreground">아직 로그가 없습니다.</p>
-                      ) : (
-                        logs.map((entry) => (
-                          <p
-                            key={entry.id}
-                            className={`rounded-md border border-border/70 bg-secondary/40 px-2 py-1 whitespace-pre-wrap break-words ${levelClass(entry.level)}`}
-                          >
-                            [{new Date(entry.timestamp).toLocaleTimeString()}] [{entry.action}]{" "}
-                            {entry.message}
-                          </p>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </section>
+            <LogsPanel
+              logs={logs}
+              busy={busy}
+              scrollAreaRef={logsScrollAreaRef}
+              onClearLogs={() => setLogs([])}
+            />
           )}
         </div>
       </section>
       </main>
-      {compilerChoiceDialog.open && compilerChoiceDialog.scan && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/72 p-4 backdrop-blur-[2px]">
-          <Card className="w-full max-w-[620px] border-border bg-card shadow-2xl">
-            <CardHeader className="space-y-2">
-              <Badge className="w-fit uppercase tracking-[0.08em]">compiler</Badge>
-              <CardTitle>컴파일러 선택</CardTitle>
-              <CardDescription>
-                MSVC가 감지되었습니다. 설치에 사용할 컴파일러를 선택하세요.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2 rounded-[10px] border border-border/70 bg-secondary p-3">
-                <p className="text-xs text-muted-foreground">감지된 MSVC 목록</p>
-                <div className="space-y-2">
-                  {compilerChoiceDialog.scan.msvcCandidates.map((candidate) => (
-                    <div
-                      key={candidate.installationPath}
-                      className="flex flex-col gap-2 rounded-[10px] border border-border/70 bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {candidate.displayName ?? "Visual Studio"}
-                          {candidate.version ? ` (${candidate.version})` : ""}
-                        </p>
-                        <p className="truncate text-[11px] text-muted-foreground">
-                          {candidate.installationPath}
-                        </p>
-                        <p className="truncate font-mono text-[11px] text-muted-foreground">
-                          {candidate.clPath}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="w-full sm:w-auto sm:shrink-0"
-                        onClick={() =>
-                          closeCompilerChoiceDialog({
-                            kind: "msvc",
-                            installationPath: candidate.installationPath
-                          })
-                        }
-                      >
-                        설치
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button
-                  variant="secondary"
-                  className="w-full justify-center"
-                  onClick={() => closeCompilerChoiceDialog({ kind: "mingw" })}
-                >
-                  MinGW 설치
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-center"
-                  onClick={() => closeCompilerChoiceDialog({ kind: "close" })}
-                >
-                  닫기
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <CompilerChoiceDialog
+        open={compilerChoiceDialog.open}
+        scan={compilerChoiceDialog.scan}
+        onSelectMsvc={(installationPath) =>
+          closeCompilerChoiceDialog({ kind: "msvc", installationPath })
+        }
+        onSelectMingw={() => closeCompilerChoiceDialog({ kind: "mingw" })}
+        onClose={() => closeCompilerChoiceDialog({ kind: "close" })}
+      />
       {statusToast && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
           <div
@@ -2338,97 +1840,3 @@ export default function App() {
   );
 }
 
-function getInstallToolStatusText(status: InstallProgressStatus): string {
-  switch (status) {
-    case "running":
-      return "설치 중";
-    case "success":
-      return "완료";
-    case "error":
-      return "실패";
-    default:
-      return "대기";
-  }
-}
-
-function getInstallToolProgressBarClass(status: InstallProgressStatus): string {
-  switch (status) {
-    case "running":
-      return "bg-amber-500";
-    case "success":
-      return "bg-emerald-600";
-    case "error":
-      return "bg-red-600";
-    default:
-      return "bg-slate-400";
-  }
-}
-
-function ToolStatusRow({
-  name,
-  ready,
-  detail,
-  progress,
-  showProgress = false
-}: {
-  name: string;
-  ready: boolean;
-  detail?: ToolStatusDetail;
-  progress?: InstallToolProgress;
-  showProgress?: boolean;
-}) {
-  const percent = progress
-    ? Math.max(0, Math.min(100, Math.trunc(progress.percent)))
-    : 0;
-  const summary = getToolStatusSummary(detail);
-  const capabilityNote = getToolCapabilityNote(detail);
-
-  return (
-    <div className="flex items-center gap-2 rounded-[10px] border border-border/70 bg-secondary/35 px-3 py-2">
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          {ready ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-          ) : (
-            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-          )}
-          <span className="truncate text-sm font-medium">{name}</span>
-        </div>
-        {summary && (
-          <p className="truncate pl-6 text-[11px] text-muted-foreground" title={summary}>
-            {summary}
-          </p>
-        )}
-        {capabilityNote && (
-          <p className="pl-6 text-[11px] text-muted-foreground/90" title={capabilityNote}>
-            {capabilityNote}
-          </p>
-        )}
-      </div>
-      {showProgress && progress && (
-        <div className="mx-1 flex min-w-0 flex-1 items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border/70">
-            <div
-              className={`h-full transition-[width] duration-300 ${getInstallToolProgressBarClass(progress.status)}`}
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-            {getInstallToolStatusText(progress.status)} {percent}%
-          </span>
-        </div>
-      )}
-      <div className="ml-auto">
-        <ToolChip ready={ready} />
-      </div>
-    </div>
-  );
-}
-
-function ToolChip({
-  ready
-}: {
-  ready: boolean;
-}) {
-  return <Badge variant={ready ? "success" : "secondary"}>{ready ? "준비됨" : "누락"}</Badge>;
-}

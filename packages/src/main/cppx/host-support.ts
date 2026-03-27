@@ -300,6 +300,7 @@ export async function resolveHostSupport(
     if (supported) {
       notes.push("Official macOS managed flow uses Homebrew.");
       notes.push("vcpkg uses a verified archive/bootstrap path.");
+      notes.push("Pinned exact versions for cmake, ninja, and conan use verified archives.");
       if (!homebrew.available) {
         notes.push("Homebrew is required before macOS managed installs can run.");
       }
@@ -331,7 +332,8 @@ export async function resolveHostSupport(
     const notes = [
       "Official Linux managed support is limited to Ubuntu 24.04.",
       "Ubuntu 24.04 uses apt for managed core tools and archive/bootstrap for vcpkg.",
-      "Ubuntu 24.04 uses pipx-managed Conan to avoid mutating the system Python environment."
+      "Ubuntu 24.04 uses pipx-managed Conan to avoid mutating the system Python environment.",
+      "Pinned exact versions for cmake and ninja use verified archives."
     ];
 
     if (!apt.available) {
@@ -437,8 +439,12 @@ export async function resolveToolLifecycleCapabilities(
         "homebrew",
         { detect: true, install: true, repair: true, remove: true },
         tool === "cxx"
-          ? "macOS managed C++ installs the Homebrew llvm toolchain."
-          : "macOS managed tools use Homebrew formulas."
+          ? "macOS managed C++ installs the Homebrew llvm toolchain. Exact compiler pinning is not yet supported."
+          : tool === "conan"
+            ? "macOS managed Conan uses Homebrew by default and verified release archives for exact pinned versions."
+            : tool === "cmake" || tool === "ninja"
+              ? "macOS managed core tools use Homebrew by default and verified archives for exact pinned versions."
+              : "macOS managed tools use Homebrew formulas."
       );
     }
 
@@ -471,11 +477,11 @@ export async function resolveToolLifecycleCapabilities(
     if (tool === "conan") {
       if (support.recommendedProvider === "apt") {
         if (support.managedLifecycleReady) {
-          return createLifecycleCapabilities(
-            "pipx",
-            { detect: true, install: true, repair: true, remove: true },
-            "Ubuntu 24.04 managed Conan uses pipx."
-          );
+        return createLifecycleCapabilities(
+          "pipx",
+          { detect: true, install: true, repair: true, remove: true },
+          "Ubuntu 24.04 managed Conan uses pipx and supports exact pinned versions."
+        );
         }
 
         return createLifecycleCapabilities(
@@ -498,8 +504,10 @@ export async function resolveToolLifecycleCapabilities(
           "apt",
           { detect: true, install: true, repair: true, remove: true },
           tool === "cxx"
-            ? "Ubuntu 24.04 managed C++ installs clang via apt."
-            : "Ubuntu 24.04 managed core tools use apt."
+            ? "Ubuntu 24.04 managed C++ installs clang via apt. Exact compiler pinning is not yet supported."
+            : tool === "cmake" || tool === "ninja"
+              ? "Ubuntu 24.04 managed core tools use apt by default and verified archives for exact pinned versions."
+              : "Ubuntu 24.04 managed core tools use apt."
         );
       }
 

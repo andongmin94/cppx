@@ -13,6 +13,8 @@ on:
 jobs:
   validate:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +25,8 @@ jobs:
     defaults:
       run:
         working-directory: packages
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -121,6 +125,30 @@ jobs:
           $env:CPPX_SMOKE_BACKEND = "conan"
           node ./scripts/run-smoke-ci.mjs
 
+      - name: macOS exact-version vcpkg smoke
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "system"
+          $env:CPPX_SMOKE_BACKEND = "vcpkg"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "4.2.3"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_VCPKG_VERSION = "2026.02.27"
+          node ./scripts/run-smoke-ci.mjs
+
+      - name: macOS exact-version conan smoke
+        if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "system"
+          $env:CPPX_SMOKE_BACKEND = "conan"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "4.2.3"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_CONAN_VERSION = "2.23.0"
+          node ./scripts/run-smoke-ci.mjs
+
       - name: Linux managed vcpkg smoke
         if: runner.os == 'Linux'
         shell: pwsh
@@ -139,6 +167,30 @@ jobs:
           $env:CPPX_SMOKE_BACKEND = "conan"
           node ./scripts/run-smoke-ci.mjs
 
+      - name: Linux exact-version vcpkg smoke
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "vcpkg"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "4.2.3"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_VCPKG_VERSION = "2026.02.27"
+          node ./scripts/run-smoke-ci.mjs
+
+      - name: Linux exact-version conan smoke
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "conan"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "4.2.3"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_CONAN_VERSION = "2.23.0"
+          node ./scripts/run-smoke-ci.mjs
+
       - name: Windows managed smoke
         if: runner.os == 'Windows'
         shell: pwsh
@@ -154,6 +206,30 @@ jobs:
           npm run cppx -- run $workspace
           npm run cppx -- test $workspace
           npm run cppx -- pack $workspace
+
+      - name: Windows exact-version vcpkg smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "vcpkg"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "3.30.5"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_VCPKG_VERSION = "2026.02.27"
+          node ./scripts/run-smoke-ci.mjs
+
+      - name: Windows exact-version conan smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:CPPX_SMOKE_TOOL_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "managed"
+          $env:CPPX_SMOKE_BACKEND = "conan"
+          $env:CPPX_SMOKE_CMAKE_VERSION = "3.30.5"
+          $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
+          $env:CPPX_SMOKE_CONAN_VERSION = "2.23.0"
+          node ./scripts/run-smoke-ci.mjs
 
   docs:
     runs-on: ubuntu-latest

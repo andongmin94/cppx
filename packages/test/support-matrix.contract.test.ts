@@ -146,6 +146,8 @@ test("host support matrix stays aligned across official and best-effort hosts", 
 test("support docs keep the same official-host matrix wording", async () => {
   const installGuide = await readRepoText("docs", "guide", "install.md");
   const cliGuide = await readRepoText("docs", "guide", "cli.md");
+  const guiGuide = await readRepoText("docs", "guide", "gui.md");
+  const readme = await readRepoText("README.md");
 
   assert.match(
     installGuide,
@@ -177,6 +179,42 @@ test("support docs keep the same official-host matrix wording", async () => {
     /Ubuntu 24\.04: `apt` for `cmake`, `ninja`, `clang\+\+`, archive\/bootstrap for `vcpkg`, and `pipx` for `conan`/
   );
   assert.match(cliGuide, /Other Linux: system detection only/);
+  assert.match(
+    installGuide,
+    /Pinned exact versions are supported for official-host managed non-compiler tools/
+  );
+  assert.match(
+    installGuide,
+    /macOS 14\+: exact pins for `cmake`, `ninja`, and `conan` use verified archives\/releases/
+  );
+  assert.match(
+    installGuide,
+    /Ubuntu 24\.04: exact pins for `cmake` and `ninja` use verified archives, and `conan` uses `pipx`/
+  );
+  assert.match(
+    cliGuide,
+    /official-host managed non-compiler tools accept exact pins/
+  );
+  assert.match(
+    cliGuide,
+    /Ubuntu 24\.04 exact pins for `cmake` and `ninja` use verified archives, and exact `conan` pins use `pipx`/
+  );
+  assert.match(
+    guiGuide,
+    /`cmake`, `ninja`, `vcpkg`, `conan`, `cxx` 각각에 대해 `mode`와 `version`을 편집합니다\./
+  );
+  assert.match(
+    guiGuide,
+    /`cxx`는 `preferred_family`를 함께 저장하고, Windows에서 `MSVC`를 선택한 경우에만 `msvc_installation_path`를 편집합니다\./
+  );
+  assert.match(
+    guiGuide,
+    /우측 `툴체인 상태` 카드에서 CMake, Ninja, vcpkg, conan, C\+\+ 컴파일러의 준비 상태와 해석된 메타데이터를 볼 수 있습니다\./
+  );
+  assert.match(
+    readme,
+    /exact pinned versions for official-host managed non-compiler tools/
+  );
 });
 
 async function readRepoText(...segments: string[]): Promise<string> {

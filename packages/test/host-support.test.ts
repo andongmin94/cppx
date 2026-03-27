@@ -53,8 +53,10 @@ test("host support marks supported macOS + Homebrew as official managed path", a
   assert.equal(support.tier, "official");
   assert.equal(support.managedLifecycleReady, true);
   assert.equal(support.recommendedProvider, "homebrew");
+  assert.match(support.notes.join(" "), /Pinned exact versions for cmake, ninja, and conan use verified archives/);
   assert.equal(cmake.install, true);
   assert.equal(cmake.provider, "homebrew");
+  assert.match(cmake.note ?? "", /verified archives for exact pinned versions/);
   assert.equal(vcpkg.install, true);
   assert.equal(vcpkg.provider, "archive");
 });
@@ -109,13 +111,16 @@ test("linux support narrows managed planning to Ubuntu 24.04", async () => {
   assert.equal(ubuntu.tier, "official");
   assert.equal(ubuntu.recommendedProvider, "apt");
   assert.equal(ubuntu.managedLifecycleReady, true);
+  assert.match(ubuntu.notes.join(" "), /Pinned exact versions for cmake and ninja use verified archives/);
   assert.equal(fedora.recommendedProvider, "system");
   assert.equal(ubuntuCmake.provider, "apt");
   assert.equal(ubuntuCmake.install, true);
+  assert.match(ubuntuCmake.note ?? "", /verified archives for exact pinned versions/);
   assert.equal(ubuntuVcpkg.provider, "archive");
   assert.equal(ubuntuVcpkg.install, true);
   assert.equal(ubuntuConan.provider, "pipx");
   assert.equal(ubuntuConan.install, true);
+  assert.match(ubuntuConan.note ?? "", /supports exact pinned versions/);
 });
 
 test("linux os-release parser reads quoted fields", () => {

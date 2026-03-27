@@ -30,8 +30,8 @@ GUI는 크게 `탐색`, `빌드`, `로그` 세 뷰로 나뉩니다.
   - `default_preset`
   - `target_triplet`
 - **도구 정책**
-  - `cmake`, `ninja`, `vcpkg`, `cxx` 각각에 대해 `mode`와 `version`을 편집합니다.
-  - `cxx`는 `preferred_family`, `msvc_installation_path`도 함께 저장합니다.
+  - `cmake`, `ninja`, `vcpkg`, `conan`, `cxx` 각각에 대해 `mode`와 `version`을 편집합니다.
+  - `cxx`는 `preferred_family`를 함께 저장하고, Windows에서 `MSVC`를 선택한 경우에만 `msvc_installation_path`를 편집합니다.
 - **CMake 설정**
   - `compile_definitions`
   - `compile_options`
@@ -51,8 +51,9 @@ GUI는 크게 `탐색`, `빌드`, `로그` 세 뷰로 나뉩니다.
 
 - preset 목록은 `.cppx/config.toml`의 `[[presets]]`를 기준으로 표시됩니다.
 - `runnable = false`인 preset은 Run 버튼이 비활성화됩니다.
-- 우측 `툴체인 상태` 카드에서 CMake, Ninja, vcpkg, C++ 컴파일러의 준비 상태와 해석된 메타데이터를 볼 수 있습니다.
-- `설치/업데이트` 버튼으로 현재 정책에 맞게 도구 상태를 갱신할 수 있습니다.
+- 우측 `툴체인 상태` 카드에서 CMake, Ninja, vcpkg, conan, C++ 컴파일러의 준비 상태와 해석된 메타데이터를 볼 수 있습니다.
+- 현재 선택한 backend 기준으로 필요한 도구 준비 상태를 요약해서 보여 줍니다.
+- `install-tools` 버튼과 `툴체인 다시 검사` 버튼으로 도구 설치와 재검사를 분리해 처리합니다.
 
 ### 로그 뷰
 

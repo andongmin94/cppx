@@ -35,6 +35,14 @@ Provider summary:
 - Ubuntu 24.04: `apt` for `cmake`, `ninja`, `clang++`, archive/bootstrap for `vcpkg`, and `pipx` for `conan`
 - Other Linux: system detection only
 
+Pinned exact-version note:
+
+- configure pinned versions in the GUI or `.cppx/config.toml`
+- official-host managed non-compiler tools accept exact pins
+- macOS exact pins for `cmake`, `ninja`, and `conan` use verified archive/release assets
+- Ubuntu 24.04 exact pins for `cmake` and `ninja` use verified archives, and exact `conan` pins use `pipx`
+- non-Windows managed `cxx` still uses floating defaults (`latest` / `default`)
+
 Linux note:
 
 - Ubuntu 24.04 is the only official Linux managed host in this slice.

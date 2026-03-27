@@ -7,6 +7,14 @@
 - Ubuntu 24.04 x64/arm64: `apt` for core tools, verified archive/bootstrap for `vcpkg`, and `pipx` for `conan`
 - Other Linux distributions: conservative `system` detection only
 
+Pinned exact versions are supported for official-host managed non-compiler tools.
+
+- Windows: exact versions use verified archives/releases
+- macOS 14+: exact pins for `cmake`, `ninja`, and `conan` use verified archives/releases
+- Ubuntu 24.04: exact pins for `cmake` and `ninja` use verified archives, and `conan` uses `pipx`
+- `vcpkg` exact versions remain catalog-curated across official hosts
+- non-Windows `cxx` stays on floating managed defaults for now
+
 ## Basic command
 
 ```bash
@@ -34,6 +42,7 @@ npm --prefix packages run cppx -- install-tools
 
 - `cppx install-tools` uses Homebrew for `cmake`, `ninja`, `conan`, and `llvm`.
 - `vcpkg` uses the verified archive/bootstrap path.
+- pinned exact versions for `cmake`, `ninja`, and `conan` switch to verified archive/release assets.
 - Homebrew must already be installed.
 
 ### Ubuntu 24.04
@@ -44,6 +53,7 @@ npm --prefix packages run cppx -- install-tools
   - `clang`
 - `vcpkg` uses the verified archive/bootstrap path.
 - `conan` uses `pipx` in a `cppx`-owned isolated location.
+- pinned exact versions for `cmake` and `ninja` switch to verified archives instead of `apt`.
 - `cppx` bootstraps `pipx` with `apt` when the host does not already provide it.
 - `apt` operations may require root or passwordless `sudo`.
 
