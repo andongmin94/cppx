@@ -36,7 +36,7 @@ The current repository priority is **cross-platform parity**.
 
 That means:
 
-- Windows, macOS, and the official Ubuntu 24.04 slice must expose the same conceptual controls in CLI and GUI
+- Windows, macOS, and the official Ubuntu LTS profile slice (22.04, 24.04) must expose the same conceptual controls in CLI and GUI
 - docs, runtime messaging, and tests must agree on support policy
 - host-specific providers may differ internally, but the user-visible model must stay consistent
 

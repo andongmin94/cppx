@@ -166,7 +166,7 @@ function getSystemInstallHint(): string {
   }
 
   if (process.platform === "linux") {
-    return "system 모드를 쓸 때는 `cmake`, `ninja`, `clang++` 또는 `g++`, 필요하면 `conan`까지 PATH에 보여야 합니다. 예: `sudo apt-get install cmake ninja-build build-essential`";
+    return 'system 모드를 쓸 때는 `cmake`, `ninja`, `clang++` 또는 `g++`, 필요하면 `conan`까지 PATH에 보여야 합니다. `preferred_family = "gcc"`면 `g++`를, 기본 `clang`이면 `clang++`를 사용합니다. 예: `sudo apt-get install cmake ninja-build build-essential`';
   }
 
   return `\`${REPO_CPPX_COMMAND} install-tools\`로 관리형 도구를 준비하거나 system 모드 도구 경로를 확인하세요.`;

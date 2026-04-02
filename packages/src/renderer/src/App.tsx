@@ -435,6 +435,11 @@ function createLoadingToolCapabilities(): Record<
       install: false,
       repair: false,
       remove: false,
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown",
       note: "서비스 연결 후 실제 capability가 채워집니다."
     },
     ninja: {
@@ -443,6 +448,11 @@ function createLoadingToolCapabilities(): Record<
       install: false,
       repair: false,
       remove: false,
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown",
       note: "서비스 연결 후 실제 capability가 채워집니다."
     },
     vcpkg: {
@@ -451,6 +461,11 @@ function createLoadingToolCapabilities(): Record<
       install: false,
       repair: false,
       remove: false,
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown",
       note: "서비스 연결 후 실제 capability가 채워집니다."
     },
     conan: {
@@ -459,6 +474,11 @@ function createLoadingToolCapabilities(): Record<
       install: false,
       repair: false,
       remove: false,
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown",
       note: "서비스 연결 후 실제 capability가 채워집니다."
     },
     cxx: {
@@ -467,6 +487,11 @@ function createLoadingToolCapabilities(): Record<
       install: false,
       repair: false,
       remove: false,
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown",
       note: "서비스 연결 후 실제 capability가 채워집니다."
     }
   };
@@ -1581,6 +1606,11 @@ export default function App() {
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-[11px] text-muted-foreground">
+                          이 host 기본 backend는{" "}
+                          <code className="font-mono">{hostDefaults.dependencyBackend}</code>
+                          입니다.
+                        </p>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">default_preset</Label>

@@ -87,9 +87,9 @@ runnable = true
 
 Default backend and compiler preference are host-aware:
 
-- Windows x64: backend `vcpkg`, compiler `mingw` by default
+- Windows x64: backend `none`, compiler `mingw` by default
 - macOS 14+: backend `none`, compiler `clang` by default
-- Ubuntu 24.04: backend `none`, compiler `clang` by default
+- Ubuntu LTS profiles (22.04, 24.04): backend `none`, compiler `clang` by default
 - Other Linux: backend `none`, compiler `clang` with conservative system defaults
 
 ## Compiler
@@ -98,14 +98,14 @@ Default backend and compiler preference are host-aware:
 
 | Key | Meaning |
 |---|---|
-| `preferred_family` | `clang`, `mingw`, or `msvc` |
+| `preferred_family` | `clang`, `gcc`, `mingw`, or `msvc` |
 | `msvc_installation_path` | Optional preferred MSVC installation root |
 
 Recommended host usage:
 
 - Windows: `mingw` or `msvc`
-- macOS: `clang`
-- Ubuntu 24.04: `clang`
+- macOS: `clang` with `managed` (Homebrew LLVM) or `system` (Apple Clang / `clang++`)
+- Ubuntu LTS profiles (22.04, 24.04): `clang` or `gcc` with `managed` (`apt`), or `system` (`clang++` / `g++` on PATH)
 
 ## Tools
 
@@ -123,8 +123,10 @@ Pinned version behavior:
 - `cmake`, `ninja`, `vcpkg`, and `conan` support managed exact pins on official hosts
 - `vcpkg` exact versions are limited to catalog-listed releases
 - macOS exact pins for `cmake`, `ninja`, and `conan` use archive/release providers instead of default Homebrew flows
-- Ubuntu 24.04 exact pins for `cmake` and `ninja` use archive providers, and `conan` exact pins use `pipx`
+- Ubuntu LTS profiles (22.04, 24.04) exact pins for `cmake` and `ninja` use archive providers, and `conan` exact pins use `pipx`
 - non-Windows managed `cxx` currently stays on floating defaults
+- Ubuntu LTS profiles (22.04, 24.04) can choose `preferred_family = "clang"` or `preferred_family = "gcc"` for managed `cxx`
+- official macOS/Ubuntu hosts can still set `[tools.cxx].mode = "system"` explicitly
 
 `[tools.cxx]` also accepts:
 

@@ -37,7 +37,7 @@ function createInitToolchain(
 
   return {
     ...toolchain,
-    // initProject still seeds Windows projects with the default vcpkg backend
+    // initProject may still need a temporary vcpkg handle on Windows
     // before this smoke script immediately rewrites the config to dependency_backend = "none".
     vcpkg: path.join(workspace, ".cppx", "bootstrap", "vcpkg.exe")
   };

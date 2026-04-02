@@ -14,6 +14,9 @@ test("service host defaults follow the active host adapter policy", async () => 
   assert.equal(defaults.dependencyBackend, hostAdapter.getDefaultDependencyBackend());
   assert.equal(defaults.hostSupport.platform, hostAdapter.platform);
   assert.equal(defaults.toolCapabilities.cmake.detect, true);
+  assert.equal(typeof defaults.toolCapabilities.cmake.supportsExactPin, "boolean");
+  assert.ok(defaults.toolCapabilities.cmake.versionSource);
+  assert.ok(defaults.toolCapabilities.cmake.systemDetectionKind);
   assert.ok(defaults.toolCapabilities.cxx.provider);
   assert.equal(
     defaults.toolPolicies.cmake.mode,
@@ -41,6 +44,7 @@ test("service host defaults follow the active host adapter policy", async () => 
     assert.equal(defaults.toolCapabilities.cmake.install, true);
     assert.equal(defaults.toolCapabilities.conan.provider, "archive");
     assert.equal(defaults.toolCapabilities.conan.install, true);
+    assert.equal(defaults.toolCapabilities.cxx.supportsInstanceSelection, true);
   } else if (
     hostAdapter.platform === "linux" &&
     defaults.hostSupport.recommendedProvider === "apt"
@@ -56,6 +60,12 @@ test("service host defaults follow the active host adapter policy", async () => 
     assert.equal(defaults.toolPolicies.conan.mode, "managed");
     assert.equal(defaults.toolCapabilities.conan.provider, "pipx");
     assert.equal(defaults.toolCapabilities.conan.install, true);
+    assert.equal(defaults.toolCapabilities.cmake.supportsExactPin, true);
+    assert.equal(defaults.toolCapabilities.cxx.supportsExactPin, false);
+    assert.equal(
+      defaults.toolCapabilities.cmake.versionSource,
+      "host-provider-or-cppx-verified"
+    );
   } else {
     assert.equal(defaults.toolCapabilities.conan.detect, true);
   }

@@ -37,7 +37,7 @@ npm --prefix packages run cppx -- install-tools
 
 - Windows: managed CMake, Ninja, vcpkg, Conan, and MinGW tooling are available from `cppx`.
 - macOS 14+: managed Homebrew/archive paths are supported for the official host slice.
-- Ubuntu 24.04: managed `apt`/archive/`pipx` paths are supported for the official Linux slice.
+- Ubuntu LTS profiles (22.04, 24.04): managed `apt`/`archive`/`pipx` paths are supported for the official Linux slice.
 - Other Linux: conservative system detection only.
 
 ### 3. 프로젝트 초기화
@@ -85,9 +85,9 @@ GUI에서는 작업 폴더 선택, 설정 불러오기/저장, 도구 정책 편
 
 | Item | Windows | macOS | Linux |
 |---|---|---|---|
-| Default backend | `vcpkg` | `none` | `none` |
-| Default tool mode | managed + system mixed | managed on official macOS hosts | managed on Ubuntu 24.04, system on other Linux |
-| Managed core tools | archive-managed `cmake`, `ninja`, `vcpkg`, `conan`, `cxx` | Homebrew/archive-managed official slice | Ubuntu 24.04 uses `apt`/archive/`pipx`; other Linux stays system-only |
-| Conan backend | managed archive path | managed Homebrew path | Ubuntu 24.04 managed `pipx`; other Linux system-only |
+| Default backend | `none` | `none` | `none` |
+| Default tool mode | managed by default, with `cxx=system` for MSVC | managed by default on official macOS hosts, with optional `cxx=system` | managed on Ubuntu LTS profiles (22.04, 24.04) with optional `cxx=system`; other Linux stays system |
+| Managed core tools | archive-managed `cmake`, `ninja`, `vcpkg`, `conan`, `cxx` | Homebrew/archive-managed official slice | Ubuntu LTS profiles (22.04, 24.04) use `apt`/`archive`/`pipx` and expose managed `clang`/`gcc`; other Linux stays system-only |
+| Conan backend | managed archive path | managed Homebrew path | Ubuntu LTS profiles (22.04, 24.04) managed `pipx`; other Linux system-only |
 
 자세한 제한 사항은 [도구 설치](./install.md)와 [마이그레이션](./migration.md) 문서를 함께 보는 것이 좋습니다.

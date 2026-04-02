@@ -31,7 +31,7 @@ test("windows host adapter centralizes executable naming, roots, and shell comma
       );
       assert.equal(adapter.normalizePath("C:/Temp/Demo"), "c:\\temp\\demo");
       assert.equal(adapter.comparePaths("C:/Temp/Demo", "C:\\temp\\demo"), 0);
-      assert.equal(adapter.getDefaultDependencyBackend(), "vcpkg");
+      assert.equal(adapter.getDefaultDependencyBackend(), "none");
       assert.equal(adapter.getDefaultToolMode("conan"), "managed");
       assert.equal(adapter.getDefaultTargetTriplet("mingw"), "x64-mingw-dynamic");
 
@@ -85,16 +85,37 @@ test("linux host adapter provides native defaults and commands", async () => {
   }
 });
 
-test("linux host adapter enables Ubuntu 24.04 managed defaults when os-release matches the official host", async () => {
-  await withEnv("CPPX_LINUX_OS_RELEASE", 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n', async () => {
-    const adapter = createHostAdapter("linux");
+test("linux host adapter enables Ubuntu LTS managed defaults for Ubuntu 22.04 and 24.04", async () => {
+  for (const osRelease of [
+    'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+    'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n'
+  ]) {
+    await withEnv("CPPX_LINUX_OS_RELEASE", osRelease, async () => {
+      const adapter = createHostAdapter("linux");
 
-    assert.equal(adapter.getDefaultToolMode("cmake"), "managed");
-    assert.equal(adapter.getDefaultToolMode("ninja"), "managed");
-    assert.equal(adapter.getDefaultToolMode("vcpkg"), "managed");
-    assert.equal(adapter.getDefaultToolMode("cxx"), "managed");
-    assert.equal(adapter.getDefaultToolMode("conan"), "managed");
-  });
+      assert.equal(adapter.getDefaultToolMode("cmake"), "managed");
+      assert.equal(adapter.getDefaultToolMode("ninja"), "managed");
+      assert.equal(adapter.getDefaultToolMode("vcpkg"), "managed");
+      assert.equal(adapter.getDefaultToolMode("cxx"), "managed");
+      assert.equal(adapter.getDefaultToolMode("conan"), "managed");
+    });
+  }
+});
+
+test("linux host adapter keeps unsupported Linux in conservative system mode", async () => {
+  await withEnv(
+    "CPPX_LINUX_OS_RELEASE",
+    'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n',
+    async () => {
+      const adapter = createHostAdapter("linux");
+
+      assert.equal(adapter.getDefaultToolMode("cmake"), "system");
+      assert.equal(adapter.getDefaultToolMode("ninja"), "system");
+      assert.equal(adapter.getDefaultToolMode("vcpkg"), "system");
+      assert.equal(adapter.getDefaultToolMode("cxx"), "system");
+      assert.equal(adapter.getDefaultToolMode("conan"), "system");
+    }
+  );
 });
 
 test("darwin host adapter uses Application Support and native triplets", async () => {

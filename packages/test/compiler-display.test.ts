@@ -8,9 +8,12 @@ import {
 
 test("compiler display helpers expose clang wording on POSIX hosts", () => {
   assert.equal(formatCompilerPreference("linux", "clang"), "clang");
+  assert.equal(formatCompilerPreference("linux", "gcc"), "gcc");
   assert.equal(getCompilerPreferenceLabel("darwin", "clang"), "Clang");
+  assert.equal(getCompilerPreferenceLabel("linux", "gcc"), "GCC");
   assert.deepEqual(getCompilerPreferenceOptions("linux"), [
-    { value: "clang", label: "Clang" }
+    { value: "clang", label: "Clang" },
+    { value: "gcc", label: "GCC" }
   ]);
 });
 

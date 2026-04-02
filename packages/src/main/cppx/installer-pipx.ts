@@ -8,6 +8,7 @@ import { CppxError } from "./errors";
 import { ensureDir, pathExists } from "./fs-utils";
 import { isPathManagedByPipx } from "./host-support";
 import { ensureAptPackageIndex, runAptCommand } from "./installer-apt";
+import { getLinuxPipxInstallRequirementNote } from "./linux-profiles";
 import type { CppxLogger } from "./logger";
 import { getHostAdapter } from "./platform";
 import { getToolRoot, readToolManifest, upsertToolRecord } from "./paths";
@@ -162,7 +163,7 @@ async function ensurePipxAvailable(logger: CppxLogger): Promise<string> {
 
   throw new CppxError(
     "pipx를 찾지 못했습니다.",
-    "Ubuntu 24.04 managed conan 설치를 사용하려면 pipx가 필요합니다."
+    getLinuxPipxInstallRequirementNote()
   );
 }
 

@@ -2,7 +2,9 @@ import type {
   HostSupportPayload,
   ToolLifecycleCapabilities,
   ToolLifecycleProvider,
-  ToolOwnership
+  ToolLifecycleVersionSource,
+  ToolOwnership,
+  ToolSystemDetectionKind
 } from "./contracts";
 
 export function getToolLifecycleProviderLabel(provider: ToolLifecycleProvider): string {
@@ -51,12 +53,74 @@ export function formatLifecycleActions(capabilities: ToolLifecycleCapabilities):
   return actions.join("/");
 }
 
+export function getVersionSourceLabel(versionSource: ToolLifecycleVersionSource): string {
+  switch (versionSource) {
+    case "cppx-verified":
+      return "verified";
+    case "host-provider":
+      return "provider";
+    case "upstream":
+      return "upstream";
+    case "host-provider-or-cppx-verified":
+      return "provider/verified";
+    case "host-provider-or-upstream":
+      return "provider/upstream";
+    case "system":
+      return "system";
+    default:
+      return "unknown";
+  }
+}
+
+export function getSystemDetectionKindLabel(
+  systemDetectionKind: ToolSystemDetectionKind
+): string {
+  switch (systemDetectionKind) {
+    case "path":
+      return "path";
+    case "path-with-provider":
+      return "path+provider";
+    case "instance":
+      return "instance";
+    case "instance-or-path":
+      return "instance+path";
+    case "none":
+      return "n/a";
+    default:
+      return "unknown";
+  }
+}
+
+export function formatLifecycleVersionSupport(
+  capabilities: ToolLifecycleCapabilities
+): string {
+  if (capabilities.supportsExactPin && capabilities.supportsFloatingVersion) {
+    return "exact+floating";
+  }
+  if (capabilities.supportsExactPin) {
+    return "exact";
+  }
+  if (capabilities.supportsFloatingVersion) {
+    return "floating";
+  }
+  return "fixed";
+}
+
 export function formatLifecycleSummary(capabilities: ToolLifecycleCapabilities): string {
-  return `${getToolLifecycleProviderLabel(capabilities.provider)} · ${formatLifecycleActions(capabilities)}`;
+  const parts = [
+    getToolLifecycleProviderLabel(capabilities.provider),
+    formatLifecycleActions(capabilities),
+    formatLifecycleVersionSupport(capabilities),
+    getVersionSourceLabel(capabilities.versionSource),
+    getSystemDetectionKindLabel(capabilities.systemDetectionKind),
+    capabilities.supportsInstanceSelection ? "instances" : undefined
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  return parts.join(" / ");
 }
 
 export function formatHostSupportSummary(support: HostSupportPayload): string {
-  return `${support.hostLabel} · ${support.tier} · ${getToolLifecycleProviderLabel(
+  return `${support.hostLabel} / ${support.tier} / ${getToolLifecycleProviderLabel(
     support.recommendedProvider
   )}`;
 }

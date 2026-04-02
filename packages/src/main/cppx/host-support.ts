@@ -7,16 +7,26 @@ import type {
   HostSupportPayload,
   ToolLifecycleCapabilities,
   ToolLifecycleProvider,
-  ToolOwnership
+  ToolLifecycleVersionSource,
+  ToolOwnership,
+  ToolSystemDetectionKind
 } from "@shared/contracts";
+import {
+  getLinuxAptLifecycleRequirementNote,
+  getLinuxManagedCoreToolNote,
+  getLinuxManagedConanNote,
+  getLinuxManagedCxxNote,
+  getLinuxManagedHostNotes,
+  getLinuxManagedSupportLimitNote,
+  getLinuxManagedVcpkgNote,
+  getUnsupportedLinuxSystemModeNote,
+  parseLinuxOsRelease,
+  resolveLinuxHostProfile,
+  type LinuxHostProfile,
+  type LinuxReleaseInfo
+} from "./linux-profiles";
 import { getHostAdapter, type HostPlatform } from "./platform";
 import type { ToolName, ToolRecord, ToolSourceKind } from "./types";
-
-interface LinuxReleaseInfo {
-  id?: string;
-  versionId?: string;
-  prettyName?: string;
-}
 
 interface HomebrewInfo {
   available: boolean;
@@ -28,6 +38,16 @@ interface AptInfo {
   available: boolean;
   executable?: string;
 }
+
+type LifecycleActions = Pick<ToolLifecycleCapabilities, "detect" | "install" | "repair" | "remove">;
+type LifecycleMetadata = Pick<
+  ToolLifecycleCapabilities,
+  | "supportsExactPin"
+  | "supportsFloatingVersion"
+  | "supportsInstanceSelection"
+  | "versionSource"
+  | "systemDetectionKind"
+>;
 
 export interface HostSupportContext {
   platform?: HostPlatform;
@@ -43,9 +63,77 @@ export interface HostSupportContext {
 
 const execFile = promisify(execFileCb);
 
-function stripQuotes(value: string): string {
-  return value.replace(/^"(.*)"$/, "$1").trim();
-}
+const WINDOWS_ARCHIVE_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "cppx-verified",
+  systemDetectionKind: "path"
+};
+
+const WINDOWS_CXX_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: true,
+  versionSource: "upstream",
+  systemDetectionKind: "instance-or-path"
+};
+
+const MAC_PROVIDER_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "host-provider-or-cppx-verified",
+  systemDetectionKind: "path-with-provider"
+};
+
+const MAC_CXX_METADATA: LifecycleMetadata = {
+  supportsExactPin: false,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "host-provider",
+  systemDetectionKind: "path-with-provider"
+};
+
+const VERIFIED_ARCHIVE_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "cppx-verified",
+  systemDetectionKind: "path"
+};
+
+const LINUX_APT_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "host-provider-or-cppx-verified",
+  systemDetectionKind: "path-with-provider"
+};
+
+const LINUX_CXX_METADATA: LifecycleMetadata = {
+  supportsExactPin: false,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "host-provider",
+  systemDetectionKind: "path-with-provider"
+};
+
+const LINUX_PIPX_METADATA: LifecycleMetadata = {
+  supportsExactPin: true,
+  supportsFloatingVersion: true,
+  supportsInstanceSelection: false,
+  versionSource: "upstream",
+  systemDetectionKind: "path-with-provider"
+};
+
+const SYSTEM_ONLY_METADATA: LifecycleMetadata = {
+  supportsExactPin: false,
+  supportsFloatingVersion: false,
+  supportsInstanceSelection: false,
+  versionSource: "system",
+  systemDetectionKind: "path-with-provider"
+};
 
 function getDefaultHomebrewPrefix(arch: string): string {
   return arch === "arm64" ? "/opt/homebrew" : "/usr/local";
@@ -66,37 +154,7 @@ export function isSupportedMacOsVersion(version?: string | null): boolean {
   return major !== null && major >= 14;
 }
 
-export function isSupportedUbuntuVersion(version?: string | null): boolean {
-  return typeof version === "string" && version.startsWith("24.04");
-}
-
-export function parseLinuxOsRelease(text: string): LinuxReleaseInfo {
-  const info: LinuxReleaseInfo = {};
-
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separator).trim().toUpperCase();
-    const value = stripQuotes(trimmed.slice(separator + 1));
-    if (key === "ID") {
-      info.id = value.toLowerCase();
-    } else if (key === "VERSION_ID") {
-      info.versionId = value;
-    } else if (key === "PRETTY_NAME") {
-      info.prettyName = value;
-    }
-  }
-
-  return info;
-}
+export { parseLinuxOsRelease };
 
 async function readLinuxOsRelease(
   context: HostSupportContext
@@ -220,6 +278,53 @@ async function resolveAptInfo(context: HostSupportContext): Promise<AptInfo> {
   }
 }
 
+function createLifecycleCapabilities(
+  provider: ToolLifecycleProvider,
+  actions: LifecycleActions,
+  metadata: LifecycleMetadata,
+  note?: string
+): ToolLifecycleCapabilities {
+  return {
+    provider,
+    detect: actions.detect,
+    install: actions.install,
+    repair: actions.repair,
+    remove: actions.remove,
+    supportsExactPin: metadata.supportsExactPin,
+    supportsFloatingVersion: metadata.supportsFloatingVersion,
+    supportsInstanceSelection: metadata.supportsInstanceSelection,
+    versionSource: metadata.versionSource,
+    systemDetectionKind: metadata.systemDetectionKind,
+    ...(note ? { note } : {})
+  };
+}
+
+function createUnavailableLifecycle(
+  provider: ToolLifecycleProvider,
+  metadata: LifecycleMetadata,
+  note: string
+): ToolLifecycleCapabilities {
+  return createLifecycleCapabilities(
+    provider,
+    { detect: true, install: false, repair: false, remove: false },
+    metadata,
+    note
+  );
+}
+
+function getLinuxProfileFromSupport(
+  support: Pick<HostSupportPayload, "arch" | "distroId" | "distroVersion">
+): LinuxHostProfile | undefined {
+  if (!support.distroId || !support.distroVersion) {
+    return undefined;
+  }
+
+  return resolveLinuxHostProfile({
+    id: support.distroId,
+    versionId: support.distroVersion
+  }, support.arch);
+}
+
 export function isPathManagedByHomebrew(
   executablePath: string,
   options: { prefix?: string | null } = {}
@@ -326,27 +431,21 @@ export async function resolveHostSupport(
   ]);
   const distroId = release?.id;
   const distroVersion = release?.versionId;
-  const isUbuntu2404 = distroId === "ubuntu" && isSupportedUbuntuVersion(distroVersion);
+  const linuxProfile = resolveLinuxHostProfile(release, arch);
 
-  if (isUbuntu2404) {
-    const notes = [
-      "Official Linux managed support is limited to Ubuntu 24.04.",
-      "Ubuntu 24.04 uses apt for managed core tools and archive/bootstrap for vcpkg.",
-      "Ubuntu 24.04 uses pipx-managed Conan to avoid mutating the system Python environment.",
-      "Pinned exact versions for cmake and ninja use verified archives."
-    ];
-
+  if (linuxProfile) {
+    const notes = getLinuxManagedHostNotes(linuxProfile);
     if (!apt.available) {
-      notes.push("apt-get was not found, so managed lifecycle stays unavailable.");
+      notes.push(getLinuxAptLifecycleRequirementNote(linuxProfile));
     }
 
     return {
       platform,
       arch,
-      hostLabel: release?.prettyName ?? `Ubuntu 24.04 (${arch})`,
+      hostLabel: release?.prettyName ?? `${linuxProfile.label} (${arch})`,
       tier: "official",
       managedLifecycleReady: apt.available,
-      recommendedProvider: "apt",
+      recommendedProvider: linuxProfile.recommendedProvider,
       distroId,
       distroVersion,
       notes
@@ -364,25 +463,25 @@ export async function resolveHostSupport(
     recommendedProvider: "system",
     distroId,
     distroVersion,
-    notes: [
-      "Managed Linux support is limited to Ubuntu 24.04.",
-      "Unsupported Linux distributions stay in conservative system mode."
-    ]
+    notes: [getLinuxManagedSupportLimitNote(), getUnsupportedLinuxSystemModeNote()]
   };
 }
 
-function createLifecycleCapabilities(
-  provider: ToolLifecycleProvider,
-  actions: Pick<ToolLifecycleCapabilities, "detect" | "install" | "repair" | "remove">,
-  note?: string
-): ToolLifecycleCapabilities {
+function getVersionMetadata(
+  source: ToolLifecycleVersionSource,
+  detection: ToolSystemDetectionKind,
+  options: {
+    supportsExactPin: boolean;
+    supportsFloatingVersion: boolean;
+    supportsInstanceSelection?: boolean;
+  }
+): LifecycleMetadata {
   return {
-    provider,
-    detect: actions.detect,
-    install: actions.install,
-    repair: actions.repair,
-    remove: actions.remove,
-    ...(note ? { note } : {})
+    supportsExactPin: options.supportsExactPin,
+    supportsFloatingVersion: options.supportsFloatingVersion,
+    supportsInstanceSelection: options.supportsInstanceSelection ?? false,
+    versionSource: source,
+    systemDetectionKind: detection
   };
 }
 
@@ -397,6 +496,7 @@ export async function resolveToolLifecycleCapabilities(
       return createLifecycleCapabilities(
         "archive",
         { detect: true, install: true, repair: true, remove: true },
+        WINDOWS_ARCHIVE_METADATA,
         "Windows manages Conan from the official verified release archive."
       );
     }
@@ -405,16 +505,16 @@ export async function resolveToolLifecycleCapabilities(
       return createLifecycleCapabilities(
         "archive",
         { detect: true, install: true, repair: true, remove: true },
+        WINDOWS_CXX_METADATA,
         "Windows manages MinGW toolchains and detects MSVC separately."
       );
     }
 
-    return createLifecycleCapabilities("archive", {
-      detect: true,
-      install: true,
-      repair: true,
-      remove: true
-    });
+    return createLifecycleCapabilities(
+      "archive",
+      { detect: true, install: true, repair: true, remove: true },
+      WINDOWS_ARCHIVE_METADATA
+    );
   }
 
   if (support.platform === "darwin") {
@@ -423,13 +523,17 @@ export async function resolveToolLifecycleCapabilities(
         return createLifecycleCapabilities(
           "archive",
           { detect: true, install: true, repair: true, remove: true },
+          VERIFIED_ARCHIVE_METADATA,
           "macOS uses a verified archive/bootstrap path for vcpkg."
         );
       }
 
-      return createLifecycleCapabilities(
+      return createUnavailableLifecycle(
         "archive",
-        { detect: true, install: false, repair: false, remove: false },
+        getVersionMetadata("cppx-verified", "path", {
+          supportsExactPin: false,
+          supportsFloatingVersion: false
+        }),
         "Managed vcpkg support is limited to official macOS hosts."
       );
     }
@@ -438,6 +542,7 @@ export async function resolveToolLifecycleCapabilities(
       return createLifecycleCapabilities(
         "homebrew",
         { detect: true, install: true, repair: true, remove: true },
+        tool === "cxx" ? MAC_CXX_METADATA : MAC_PROVIDER_METADATA,
         tool === "cxx"
           ? "macOS managed C++ installs the Homebrew llvm toolchain. Exact compiler pinning is not yet supported."
           : tool === "conan"
@@ -448,9 +553,17 @@ export async function resolveToolLifecycleCapabilities(
       );
     }
 
-    return createLifecycleCapabilities(
+    return createUnavailableLifecycle(
       "homebrew",
-      { detect: true, install: false, repair: false, remove: false },
+      tool === "cxx"
+        ? getVersionMetadata("host-provider", "path-with-provider", {
+            supportsExactPin: false,
+            supportsFloatingVersion: false
+          })
+        : getVersionMetadata("host-provider-or-cppx-verified", "path-with-provider", {
+            supportsExactPin: false,
+            supportsFloatingVersion: false
+          }),
       support.tier === "official"
         ? "Homebrew must be available before macOS managed installs can run."
         : "Managed macOS support is limited to official macOS hosts."
@@ -458,79 +571,101 @@ export async function resolveToolLifecycleCapabilities(
   }
 
   if (support.platform === "linux") {
+    const linuxProfile = getLinuxProfileFromSupport(support);
+
     if (tool === "vcpkg") {
-      if (support.tier === "official") {
+      if (linuxProfile) {
         return createLifecycleCapabilities(
           "archive",
           { detect: true, install: true, repair: true, remove: true },
-          "Ubuntu 24.04 manages vcpkg through the verified archive/bootstrap path."
+          VERIFIED_ARCHIVE_METADATA,
+          getLinuxManagedVcpkgNote(linuxProfile)
         );
       }
 
-      return createLifecycleCapabilities(
+      return createUnavailableLifecycle(
         "archive",
-        { detect: true, install: false, repair: false, remove: false },
-        "Managed Linux vcpkg support is limited to Ubuntu 24.04."
+        getVersionMetadata("cppx-verified", "path", {
+          supportsExactPin: false,
+          supportsFloatingVersion: false
+        }),
+        getLinuxManagedSupportLimitNote()
       );
     }
 
     if (tool === "conan") {
-      if (support.recommendedProvider === "apt") {
+      if (linuxProfile) {
         if (support.managedLifecycleReady) {
-        return createLifecycleCapabilities(
-          "pipx",
-          { detect: true, install: true, repair: true, remove: true },
-          "Ubuntu 24.04 managed Conan uses pipx and supports exact pinned versions."
-        );
+          return createLifecycleCapabilities(
+            "pipx",
+            { detect: true, install: true, repair: true, remove: true },
+            LINUX_PIPX_METADATA,
+            getLinuxManagedConanNote(linuxProfile)
+          );
         }
 
-        return createLifecycleCapabilities(
+        return createUnavailableLifecycle(
           "pipx",
-          { detect: true, install: false, repair: false, remove: false },
-          "apt-get must be available before Ubuntu managed Conan installs can run."
+          getVersionMetadata("upstream", "path-with-provider", {
+            supportsExactPin: false,
+            supportsFloatingVersion: false
+          }),
+          getLinuxAptLifecycleRequirementNote(linuxProfile)
         );
       }
 
-      return createLifecycleCapabilities(
+      return createUnavailableLifecycle(
         "system",
-        { detect: true, install: false, repair: false, remove: false },
+        SYSTEM_ONLY_METADATA,
         "Unsupported Linux distributions use system conan only."
       );
     }
 
-    if (support.recommendedProvider === "apt") {
+    if (linuxProfile) {
       if (support.managedLifecycleReady) {
         return createLifecycleCapabilities(
           "apt",
           { detect: true, install: true, repair: true, remove: true },
+          tool === "cxx" ? LINUX_CXX_METADATA : LINUX_APT_METADATA,
           tool === "cxx"
-            ? "Ubuntu 24.04 managed C++ installs clang via apt. Exact compiler pinning is not yet supported."
-            : tool === "cmake" || tool === "ninja"
-              ? "Ubuntu 24.04 managed core tools use apt by default and verified archives for exact pinned versions."
-              : "Ubuntu 24.04 managed core tools use apt."
+            ? getLinuxManagedCxxNote(linuxProfile)
+            : getLinuxManagedCoreToolNote(linuxProfile)
         );
       }
 
-      return createLifecycleCapabilities(
+      return createUnavailableLifecycle(
         "apt",
-        { detect: true, install: false, repair: false, remove: false },
-        "apt-get must be available before Ubuntu managed installs can run."
+        tool === "cxx"
+          ? getVersionMetadata("host-provider", "path-with-provider", {
+              supportsExactPin: false,
+              supportsFloatingVersion: false
+            })
+          : getVersionMetadata("host-provider-or-cppx-verified", "path-with-provider", {
+              supportsExactPin: false,
+              supportsFloatingVersion: false
+            }),
+        getLinuxAptLifecycleRequirementNote(linuxProfile)
       );
     }
 
-    return createLifecycleCapabilities(
+    return createUnavailableLifecycle(
       "system",
-      { detect: true, install: false, repair: false, remove: false },
-      "Managed Linux support is limited to Ubuntu 24.04."
+      SYSTEM_ONLY_METADATA,
+      getLinuxManagedSupportLimitNote()
     );
   }
 
-  return createLifecycleCapabilities("system", {
-    detect: true,
-    install: false,
-    repair: false,
-    remove: false
-  });
+  return createLifecycleCapabilities(
+    "system",
+    { detect: true, install: false, repair: false, remove: false },
+    {
+      supportsExactPin: false,
+      supportsFloatingVersion: false,
+      supportsInstanceSelection: false,
+      versionSource: "unknown",
+      systemDetectionKind: "unknown"
+    }
+  );
 }
 
 export function inferProviderFromSourceKind(sourceKind?: ToolSourceKind): ToolLifecycleProvider {

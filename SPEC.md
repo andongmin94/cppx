@@ -52,7 +52,7 @@ The official hosts for this product slice are:
 
 - Windows x64
 - macOS 14+ (`x64` and `arm64`)
-- Ubuntu 24.04 (`x64` and `arm64`)
+- Ubuntu LTS profiles (22.04, 24.04) (`x64` and `arm64`)
 
 ### 3.2 Best-effort hosts
 
@@ -90,7 +90,7 @@ The model must support host-valid choices such as:
 
 - Windows: `mingw` managed, `msvc` system
 - macOS: `clang` system (Apple toolchain), `clang` managed (Homebrew LLVM)
-- Ubuntu 24.04: `clang` managed at minimum, with optional `gcc` system support if implemented in the same model
+- Ubuntu LTS profiles (22.04, 24.04): `clang` managed at minimum, with optional `gcc` system support if implemented in the same model
 
 A compiler value that is semantically wrong for the current host must not be used as the visible default. In particular, non-Windows hosts must not default to a `mingw` family label.
 
@@ -142,14 +142,14 @@ Required product behavior:
 - GUI and CLI must not imply that managed lifecycle is unsupported if the product uses Homebrew/archive as the official path
 - compiler selection must use a macOS-appropriate representation instead of a Windows-oriented label
 
-### 6.3 Ubuntu 24.04
+### 6.3 Ubuntu LTS profiles
 
 Required product behavior:
 
-- Ubuntu 24.04 is the official Linux managed slice
+- Ubuntu LTS profiles (22.04, 24.04) are the official Linux managed slice for this batch
 - backend choice includes `vcpkg`, `conan`, `none`
 - managed path may use `apt`, archive/bootstrap, and `pipx`
-- CLI, GUI, docs, and tests must agree that Ubuntu 24.04 is the managed Linux slice
+- CLI, GUI, docs, and tests must agree that Ubuntu LTS profiles (22.04, 24.04) are the managed Linux slice
 - other Linux distributions must remain clearly marked as best-effort system-only
 
 ## 7. CLI and GUI parity requirements
@@ -189,7 +189,7 @@ The current implementation work should prioritize the following:
 
 1. unify AI instruction entrypoints at the root
 2. introduce a single source of truth for host capability and lifecycle support
-3. make Windows, macOS, and Ubuntu 24.04 expose one consistent CLI/GUI toolchain model
+3. make Windows, macOS, and Ubuntu LTS profiles (22.04, 24.04) expose one consistent CLI/GUI toolchain model
 4. remove Windows-only wording from compiler selection contracts
 5. make official-host Conan support product-level and explicit
 6. rewrite docs so README, install guide, CLI guide, GUI language, and support tables all agree
@@ -212,8 +212,8 @@ The following are important but out of scope for this batch unless directly need
 This spec is satisfied only when all of the following are true:
 
 1. CLI and GUI expose the same backend choices and host-appropriate compiler choices on official hosts.
-2. Windows, macOS, and Ubuntu 24.04 no longer present contradictory tool-lifecycle/support claims.
-3. Ubuntu 24.04 is consistently documented and implemented as the official managed Linux slice.
+2. Windows, macOS, and Ubuntu LTS profiles (22.04, 24.04) no longer present contradictory tool-lifecycle/support claims.
+3. Ubuntu LTS profiles (22.04, 24.04) are consistently documented and implemented as the official managed Linux slice.
 4. Windows Conan is no longer represented as a second-class detect-only path if Windows remains an official tool-management host.
 5. Non-Windows hosts no longer surface `mingw` as the visible default compiler family.
 6. README, install docs, CLI docs, and runtime UI all describe the same support matrix.

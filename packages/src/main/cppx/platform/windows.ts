@@ -88,7 +88,7 @@ export const windowsHostAdapter: HostAdapter = {
   },
 
   getDefaultDependencyBackend() {
-    return "vcpkg";
+    return "none";
   },
 
   getDefaultToolMode(tool: ToolName, compilerFamily?: "mingw" | "msvc") {

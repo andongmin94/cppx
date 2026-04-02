@@ -14,6 +14,10 @@ function normalizeDisplayCompilerPreference(
     return platform === "win32" ? "mingw" : "clang";
   }
 
+  if (compilerPreference === "gcc") {
+    return platform === "linux" ? "gcc" : "clang";
+  }
+
   return "clang";
 }
 
@@ -40,7 +44,11 @@ export function getCompilerPreferenceLabel(
     return "MSVC";
   }
 
-  return normalized === "mingw" ? "MinGW" : "Clang";
+  if (normalized === "mingw") {
+    return "MinGW";
+  }
+
+  return normalized === "gcc" ? "GCC" : "Clang";
 }
 
 export function getCompilerPreferenceOptions(
@@ -50,6 +58,13 @@ export function getCompilerPreferenceOptions(
     return [
       { value: "mingw", label: getCompilerPreferenceLabel(platform, "mingw") },
       { value: "msvc", label: "MSVC" }
+    ];
+  }
+
+  if (platform === "linux") {
+    return [
+      { value: "clang", label: getCompilerPreferenceLabel(platform, "clang") },
+      { value: "gcc", label: getCompilerPreferenceLabel(platform, "gcc") }
     ];
   }
 

@@ -19,16 +19,10 @@
       "displayName": "Debug x64",
       "binaryDir": "${sourceDir}/../debug-x64",
       "generator": "Ninja",
-      "toolchainFile": "C:\\cppx-tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_MAKE_PROGRAM": "C:\\cppx-tools\\ninja\\ninja.exe",
         "CMAKE_CXX_COMPILER": "C:\\cppx-tools\\llvm-mingw\\bin\\clang++.exe",
-        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
         "CMAKE_BUILD_TYPE": "Debug"
-      },
-      "environment": {
-        "VCPKG_ROOT": "C:\\cppx-tools\\vcpkg",
-        "VCPKG_MANIFEST_DIR": "${sourceDir}"
       }
     },
     {
@@ -36,16 +30,10 @@
       "displayName": "Release x64",
       "binaryDir": "${sourceDir}/../release-x64",
       "generator": "Ninja",
-      "toolchainFile": "C:\\cppx-tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_MAKE_PROGRAM": "C:\\cppx-tools\\ninja\\ninja.exe",
         "CMAKE_CXX_COMPILER": "C:\\cppx-tools\\llvm-mingw\\bin\\clang++.exe",
-        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
         "CMAKE_BUILD_TYPE": "Release"
-      },
-      "environment": {
-        "VCPKG_ROOT": "C:\\cppx-tools\\vcpkg",
-        "VCPKG_MANIFEST_DIR": "${sourceDir}"
       }
     }
   ],

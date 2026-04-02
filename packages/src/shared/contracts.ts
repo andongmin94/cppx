@@ -7,7 +7,7 @@
   | "test"
   | "pack";
 
-export type CompilerPreference = "clang" | "mingw" | "msvc";
+export type CompilerPreference = "clang" | "gcc" | "mingw" | "msvc";
 export type ToolInstallMode = "managed" | "system";
 export type DependencyBackend = "vcpkg" | "conan" | "none";
 export type ToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
@@ -23,6 +23,21 @@ export type ToolLifecycleProvider =
   | "unknown";
 export type ToolOwnership = "cppx" | "external" | "unknown";
 export type HostSupportTier = "official" | "best-effort";
+export type ToolLifecycleVersionSource =
+  | "cppx-verified"
+  | "host-provider"
+  | "upstream"
+  | "host-provider-or-cppx-verified"
+  | "host-provider-or-upstream"
+  | "system"
+  | "unknown";
+export type ToolSystemDetectionKind =
+  | "none"
+  | "path"
+  | "path-with-provider"
+  | "instance"
+  | "instance-or-path"
+  | "unknown";
 
 export type LogLevel =
   | "info"
@@ -132,6 +147,11 @@ export interface ToolLifecycleCapabilities {
   install: boolean;
   repair: boolean;
   remove: boolean;
+  supportsExactPin: boolean;
+  supportsFloatingVersion: boolean;
+  supportsInstanceSelection: boolean;
+  versionSource: ToolLifecycleVersionSource;
+  systemDetectionKind: ToolSystemDetectionKind;
   note?: string;
 }
 

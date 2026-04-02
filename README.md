@@ -14,7 +14,7 @@ The official host slice for this repository direction is:
 
 - Windows x64
 - macOS 14+ (`x64`, `arm64`)
-- Ubuntu 24.04 (`x64`, `arm64`)
+- Ubuntu LTS profiles (22.04, 24.04) (`x64`, `arm64`)
 
 Other Linux distributions remain best-effort and system-oriented until they are explicitly promoted.
 

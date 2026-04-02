@@ -4,16 +4,16 @@
 
 - Windows x64: managed archives for core tools, plus system MSVC detection
 - macOS 14+: Homebrew for core tools, verified archive/bootstrap for `vcpkg`
-- Ubuntu 24.04 x64/arm64: `apt` for core tools, verified archive/bootstrap for `vcpkg`, and `pipx` for `conan`
+- Ubuntu LTS profiles (22.04, 24.04): `apt` for core tools and the managed Clang/GCC compiler path, verified archive/bootstrap for `vcpkg`, and `pipx` for `conan`
 - Other Linux distributions: conservative `system` detection only
 
 Pinned exact versions are supported for official-host managed non-compiler tools.
 
 - Windows: exact versions use verified archives/releases
 - macOS 14+: exact pins for `cmake`, `ninja`, and `conan` use verified archives/releases
-- Ubuntu 24.04: exact pins for `cmake` and `ninja` use verified archives, and `conan` uses `pipx`
+- Ubuntu LTS profiles (22.04, 24.04): exact pins for `cmake` and `ninja` use verified archives, and `conan` uses `pipx`
 - `vcpkg` exact versions remain catalog-curated across official hosts
-- non-Windows `cxx` stays on floating managed defaults for now
+- non-Windows managed `cxx` stays on floating defaults for now, but official macOS/Ubuntu hosts expose both managed and system compiler paths
 
 ## Basic command
 
@@ -25,9 +25,9 @@ npm --prefix packages run cppx -- install-tools
 
 | Host | Default backend | CMake / Ninja | vcpkg | conan | C++ compiler |
 |---|---|---|---|---|---|
-| Windows x64 | `vcpkg` | `managed` | `managed` | `managed` | `managed` (MinGW) or `system` (MSVC) |
-| macOS 14+ | `none` | `managed` | `managed` | `managed` | `managed` (Homebrew llvm) |
-| Ubuntu 24.04 | `none` | `managed` | `managed` | `managed` (`pipx`) | `managed` (`clang++` via `apt`) |
+| Windows x64 | `none` | `managed` | `managed` | `managed` | `managed` (MinGW) or `system` (MSVC) |
+| macOS 14+ | `none` | `managed` | `managed` | `managed` | `managed` (Homebrew LLVM) or `system` (Apple Clang / `clang++`) |
+| Ubuntu LTS profiles (22.04, 24.04) | `none` | `managed` | `managed` | `managed` (`pipx`) | `managed` (`Clang` or `GCC` via `apt`) or `system` (PATH `clang++` / `g++`) |
 | Other Linux | `none` | `system` | `system` | `system` | `system` |
 
 ## Provider behavior
@@ -43,23 +43,26 @@ npm --prefix packages run cppx -- install-tools
 - `cppx install-tools` uses Homebrew for `cmake`, `ninja`, `conan`, and `llvm`.
 - `vcpkg` uses the verified archive/bootstrap path.
 - pinned exact versions for `cmake`, `ninja`, and `conan` switch to verified archive/release assets.
+- `tools.cxx.mode = "system"` keeps using the compiler already visible on `PATH`.
 - Homebrew must already be installed.
 
-### Ubuntu 24.04
+### Ubuntu LTS profiles (22.04, 24.04)
 
 - `cppx install-tools` uses `apt` for:
   - `cmake`
   - `ninja-build`
-  - `clang`
+  - `clang` or `g++` for the managed compiler, depending on `preferred_family`
 - `vcpkg` uses the verified archive/bootstrap path.
 - `conan` uses `pipx` in a `cppx`-owned isolated location.
 - pinned exact versions for `cmake` and `ninja` switch to verified archives instead of `apt`.
+- `tools.cxx.mode = "managed"` uses `clang` or `g++` from `apt`, depending on `preferred_family`.
+- `tools.cxx.mode = "system"` uses the selected compiler from `PATH` (`clang++` or `g++`).
 - `cppx` bootstraps `pipx` with `apt` when the host does not already provide it.
 - `apt` operations may require root or passwordless `sudo`.
 
 ### Unsupported Linux distributions
 
-- `cppx` does not claim managed Linux parity outside Ubuntu 24.04.
+- `cppx` does not claim managed Linux parity outside Ubuntu LTS profiles (22.04, 24.04).
 - `install-tools` falls back to system detection instead of pretending managed support exists.
 
 ## Tool policy
@@ -69,9 +72,11 @@ Each tool is resolved in either `managed` or `system` mode.
 - `managed`
   - Windows: archive installs
   - macOS: Homebrew or archive/bootstrap
-  - Ubuntu 24.04: `apt`, archive/bootstrap, or `pipx`
+  - Ubuntu LTS profiles (22.04, 24.04): `apt`, archive/bootstrap, or `pipx`
 - `system`
   - Use what is already available on `PATH`
+  - macOS official hosts can keep Apple Clang in `system` mode
+  - Ubuntu LTS official hosts can choose `clang` or `gcc` in managed mode, or keep `clang++` / `g++` in system mode
   - `status` and `doctor` still report provider and ownership metadata when possible
 
 `status` and `doctor` report:
@@ -83,9 +88,9 @@ Each tool is resolved in either `managed` or `system` mode.
 - `resolvedVersion`
 - `verifiedSha256`
 
-On Ubuntu 24.04, provider ownership is split by tool:
+On Ubuntu LTS profiles (22.04, 24.04), provider ownership is split by tool:
 
-- `apt` for `cmake`, `ninja`, and `clang++`
+- `apt` for `cmake`, `ninja`, and the selected managed compiler (`clang++` or `g++`)
 - archive/bootstrap for `vcpkg`
 - `pipx` for `conan`
 
@@ -109,10 +114,16 @@ npm --prefix packages run cppx -- install-tools --compiler msvc --msvc-installat
 npm --prefix packages run cppx -- install-tools
 ```
 
-### Ubuntu 24.04 managed host bootstrap
+### Ubuntu LTS managed host bootstrap
 
 ```bash
 npm --prefix packages run cppx -- install-tools
+```
+
+### Ubuntu LTS managed GCC bootstrap
+
+```bash
+npm --prefix packages run cppx -- install-tools --compiler gcc
 ```
 
 ### Unsupported Linux system detection

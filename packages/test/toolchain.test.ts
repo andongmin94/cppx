@@ -94,10 +94,18 @@ test("getToolStatus and resolveToolchainOrThrow honor the current managed tool l
       const toolchain = await resolveToolchainOrThrow(logger);
       assert.equal(toolchain.cmake, cmake);
       assert.equal(toolchain.ninja, ninja);
-      assert.equal(toolchain.vcpkg, vcpkg);
+      assert.equal(toolchain.vcpkg, undefined);
       assert.equal(toolchain.cxx, cxx);
       assert.equal(toolchain.compilerFamily, "mingw");
       assert.deepEqual(toolchain.envPath, [
+        path.dirname(cmake),
+        path.dirname(ninja),
+        path.dirname(cxx)
+      ]);
+
+      const vcpkgToolchain = await resolveToolchainOrThrow(logger, undefined, "vcpkg");
+      assert.equal(vcpkgToolchain.vcpkg, vcpkg);
+      assert.deepEqual(vcpkgToolchain.envPath, [
         path.dirname(cmake),
         path.dirname(ninja),
         path.dirname(vcpkg),
@@ -244,7 +252,7 @@ test("installAllTools fails clearly when managed lifecycle is not supported on u
               assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
               assert.match(
                 error.details ?? "",
-                /Ubuntu 24\.04|Managed Linux support is limited to Ubuntu 24\.04|managed 수명주기/
+                /Ubuntu LTS profiles \(22\.04, 24\.04\)|Managed Linux support is limited to Ubuntu LTS profiles \(22\.04, 24\.04\)|managed 수명주기/
               );
               return true;
             }
@@ -354,6 +362,91 @@ test("getToolStatus and resolveToolchainOrThrow surface pipx-managed conan on su
             path.dirname(cmake),
             path.dirname(ninja),
             path.dirname(conan),
+            path.dirname(cxx)
+          ]);
+        });
+      }
+    );
+  } finally {
+    await removeDir(hostRoot);
+  }
+});
+
+test("resolveToolchainOrThrow supports apt-managed gcc on supported Linux hosts", async () => {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const hostRoot = await createTempDir("linux-managed-gcc");
+  const { logger } = createLogger();
+  const hostAdapter = getHostAdapter();
+
+  try {
+    await withEnv(
+      "CPPX_LINUX_OS_RELEASE",
+      'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+      async () => {
+        await withHostDataRoot(hostRoot, async () => {
+          const cmake = path.join(getToolRoot("cmake"), "bin", hostAdapter.getExecutableName("cmake"));
+          const ninja = path.join(getToolRoot("ninja"), hostAdapter.getExecutableName("ninja"));
+          const cxx = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("g++"));
+
+          await writeExecutable(cmake);
+          await writeExecutable(ninja);
+          await writeExecutable(cxx);
+
+          await upsertToolRecord({
+            name: "cmake",
+            executable: cmake,
+            root: getToolRoot("cmake"),
+            version: "3.28.3",
+            installedAt: "2026-04-02T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "ninja",
+            executable: ninja,
+            root: getToolRoot("ninja"),
+            version: "1.11.1",
+            installedAt: "2026-04-02T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx"
+          });
+          await upsertToolRecord({
+            name: "cxx",
+            executable: cxx,
+            root: getToolRoot("cxx"),
+            version: "13.3.0",
+            installedAt: "2026-04-02T00:00:00.000Z",
+            mode: "managed",
+            sourceKind: "apt-managed",
+            provider: "apt",
+            ownership: "cppx",
+            compilerFamily: "gcc"
+          });
+
+          const toolchain = await resolveToolchainOrThrow(
+            logger,
+            {
+              cmake: { mode: "managed", version: "default" },
+              ninja: { mode: "managed", version: "default" },
+              cxx: { mode: "managed", version: "latest", preferredFamily: "gcc" }
+            },
+            "none"
+          );
+
+          assert.equal(toolchain.cmake, cmake);
+          assert.equal(toolchain.ninja, ninja);
+          assert.equal(toolchain.cxx, cxx);
+          assert.equal(toolchain.compilerFamily, "gcc");
+          assert.deepEqual(toolchain.envPath, [
+            path.dirname(cmake),
+            path.dirname(ninja),
             path.dirname(cxx)
           ]);
         });
@@ -557,12 +650,14 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
   const { logger } = createLogger();
   const hostAdapter = getHostAdapter();
   const dependencyBackend = hostAdapter.getDefaultDependencyBackend();
+  const preferredSystemCompiler = process.platform === "win32" ? "mingw" : "clang";
+  const expectedCompilerExecutable = hostAdapter.getExecutableName("clang++");
 
   try {
     const cmake = path.join(toolPath, hostAdapter.getExecutableName("cmake"));
     const ninja = path.join(toolPath, hostAdapter.getExecutableName("ninja"));
     const vcpkg = path.join(toolPath, hostAdapter.getExecutableName("vcpkg"));
-    const cxx = path.join(toolPath, hostAdapter.getExecutableName("clang++"));
+    const cxx = path.join(toolPath, expectedCompilerExecutable);
 
     await writeExecutable(cmake);
     await writeExecutable(ninja);
@@ -572,23 +667,6 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
     }
 
     await withHostDataRoot(hostRoot, async () => {
-      if (process.platform === "win32") {
-        const staleCompiler = path.join(getToolRoot("cxx"), "bin", hostAdapter.getExecutableName("cl"));
-        await writeExecutable(staleCompiler);
-        await upsertToolRecord({
-          name: "cxx",
-          executable: staleCompiler,
-          root: getToolRoot("cxx"),
-          version: "system",
-          installedAt: "2026-03-25T00:00:00.000Z",
-          mode: "system",
-          sourceKind: "msvc-detected",
-          compilerFamily: "msvc",
-          provider: "msvc",
-          ownership: "external"
-        });
-      }
-
       await withEnv(
         "PATH",
         `${toolPath}${hostAdapter.getPathSeparator()}${process.env.PATH ?? ""}`,
@@ -599,7 +677,7 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
               cmake: { mode: "system", version: "latest" },
               ninja: { mode: "system", version: "latest" },
               vcpkg: { mode: "system", version: "latest" },
-              cxx: { mode: "system", version: "latest", preferredFamily: hostAdapter.compilerFamily }
+              cxx: { mode: "system", version: "latest", preferredFamily: preferredSystemCompiler }
             },
             dependencyBackend
           );
@@ -613,8 +691,8 @@ test("resolveToolchainOrThrow honors explicit system tool policies via PATH", as
           } else {
             assert.equal(toolchain.vcpkg, undefined);
           }
-          assertUsesToolDir(toolchain.cxx, toolPath, hostAdapter.getExecutableName("clang++"));
-          assert.equal(toolchain.compilerFamily, hostAdapter.platform === "win32" ? "mingw" : "clang");
+          assertUsesToolDir(toolchain.cxx, toolPath, expectedCompilerExecutable);
+          assert.equal(toolchain.compilerFamily, preferredSystemCompiler);
           assert.equal(toolchain.envPath.length, 1);
           assert.equal(
             path.basename(toolchain.envPath[0]).toLowerCase(),

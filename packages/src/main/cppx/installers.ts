@@ -19,6 +19,7 @@ import {
   resolveHostSupport,
   resolveToolLifecycleCapabilities
 } from "./host-support";
+import { getLinuxConanManagedInstallSupportNote, getSupportedLinuxManagedProfileLabel } from "./linux-profiles";
 import { runSpawn } from "./command-runner";
 import { CppxError } from "./errors";
 import { findFileRecursive, pathExists } from "./fs-utils";
@@ -129,7 +130,31 @@ function normalizeCompilerFamily(
   value: unknown,
   fallback: CompilerFamily
 ): CompilerFamily {
-  return value === "clang" || value === "msvc" || value === "mingw" ? value : fallback;
+  return value === "clang" || value === "gcc" || value === "msvc" || value === "mingw"
+    ? value
+    : fallback;
+}
+
+function getCompilerExecutableCandidates(
+  preferredFamily: CompilerFamily | undefined
+): string[] {
+  if (preferredFamily === "msvc") {
+    return [hostAdapter.getExecutableName("cl")];
+  }
+
+  if (preferredFamily === "gcc") {
+    return [hostAdapter.getExecutableName("g++")];
+  }
+
+  if (preferredFamily === "mingw") {
+    return [hostAdapter.getExecutableName("clang++")];
+  }
+
+  if (hostAdapter.platform === "linux") {
+    return [hostAdapter.getExecutableName("clang++"), hostAdapter.getExecutableName("g++")];
+  }
+
+  return [hostAdapter.getExecutableName("clang++")];
 }
 
 function getHostArchLabel(): string {
@@ -465,7 +490,9 @@ async function resolveSystemCompiler(
     };
   }
 
-  const executable = await resolveExecutableFromPath(EXECUTABLE_CANDIDATES_BY_TOOL.cxx);
+  const executable = await resolveExecutableFromPath(
+    getCompilerExecutableCandidates(policy.preferredFamily)
+  );
   if (!executable) {
     return null;
   }
@@ -598,7 +625,12 @@ async function installCxxCompiler(
   }
 
   if (hostAdapter.platform === "linux") {
-    logger.info("install-tools", "apt 기반 clang++ C++ 컴파일러를 설치합니다.");
+    logger.info(
+      "install-tools",
+      policy.preferredFamily === "gcc"
+        ? "apt 기반 g++ C++ 컴파일러를 설치합니다."
+        : "apt 기반 clang++ C++ 컴파일러를 설치합니다."
+    );
     return installAptManagedTool("cxx", policy, logger);
   }
 
@@ -614,8 +646,13 @@ function toMessage(error: unknown): string {
 }
 
 function inferCompilerFamily(executable: string): CompilerFamily {
-  if (path.basename(executable).toLowerCase() === hostAdapter.getExecutableName("cl")) {
+  const basename = path.basename(executable).toLowerCase();
+  if (basename === hostAdapter.getExecutableName("cl")) {
     return "msvc";
+  }
+
+  if (basename === hostAdapter.getExecutableName("g++")) {
+    return "gcc";
   }
 
   return hostAdapter.platform === "win32" ? "mingw" : "clang";
@@ -728,7 +765,7 @@ async function installConan(
   }
 
   throw new CppxError(
-    "conan managed 설치는 현재 Windows release archive, macOS Homebrew/release archive, 또는 Ubuntu 24.04 pipx 경로를 지원합니다."
+    getLinuxConanManagedInstallSupportNote()
   );
 }
 
@@ -891,7 +928,7 @@ export async function installAllTools(
       logger.info(
         "install-tools",
         hostAdapter.platform === "linux"
-          ? "Ubuntu managed C++ 컴파일러를 설치합니다."
+          ? `${getSupportedLinuxManagedProfileLabel()} managed C++ 컴파일러를 설치합니다.`
           : "llvm-mingw 기반 C++ 컴파일러를 설치합니다."
       );
       cxx = await installCxxCompiler(policies.cxx, logger);
@@ -1080,7 +1117,11 @@ async function resolveManagedToolExecutable(
     if (support.recommendedProvider === "apt") {
       const aptExecutable = await resolveAptExecutable();
       if (aptExecutable) {
-        const aptTool = await resolveAptToolExecutable(tool, aptExecutable);
+        const aptTool = await resolveAptToolExecutable(
+          tool,
+          aptExecutable,
+          tool === "cxx" ? (policy as CompilerToolPolicy | undefined)?.preferredFamily : undefined
+        );
         if (aptTool && doesResolvedVersionSatisfyPolicy(policy?.version, aptTool.version)) {
           const ownership =
             record?.provider === "apt" && (record.ownership ?? "unknown") === "cppx"
@@ -1154,7 +1195,12 @@ async function resolveManagedToolExecutable(
     return null;
   }
 
-  for (const candidate of EXECUTABLE_CANDIDATES_BY_TOOL[tool]) {
+  const fallbackCandidates =
+    tool === "cxx"
+      ? getCompilerExecutableCandidates((policy as CompilerToolPolicy | undefined)?.preferredFamily)
+      : EXECUTABLE_CANDIDATES_BY_TOOL[tool];
+
+  for (const candidate of fallbackCandidates) {
     const found = await findFileRecursive(toolRoot, candidate);
     const fallbackResolvedVersion =
       managedRecord?.resolvedVersion ??

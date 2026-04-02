@@ -55,14 +55,14 @@ Expected implementation outcomes:
 
 Goals:
 
-- align Windows, macOS, and Ubuntu 24.04 with the same product contract
+- align Windows, macOS, and Ubuntu LTS profiles (22.04, 24.04) with the same product contract
 - keep other Linux distributions explicitly best-effort and system-only
 
 Expected implementation outcomes:
 
 - Windows: first-class tool-management behavior for the official slice
 - macOS: no contradiction between official managed path and runtime capability messaging
-- Ubuntu 24.04: official managed Linux slice implemented and described consistently
+- Ubuntu LTS profiles (22.04, 24.04): official managed Linux slice implemented and described consistently
 - other Linux: clearly marked conservative/system-only path
 
 ### Phase 5 — docs and UX unification

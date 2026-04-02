@@ -38,6 +38,7 @@ test("initProject generates the current baseline files for the active host", asy
     assert.match(configToml, /schema_version = 3/);
     assert.match(configToml, /target_name = "sample-app"/);
     assert.match(configToml, /\[package\]/);
+    assert.match(configToml, /dependency_backend = "none"/);
 
     if (process.platform === "win32") {
       assert.equal(
@@ -48,12 +49,8 @@ test("initProject generates the current baseline files for the active host", asy
         await readJson(path.join(generatedRoot(workspace), "CMakePresets.json")),
         await readFixtureJson("init-mingw", "CMakePresets.json")
       );
-      assert.deepEqual(
-        await readJson(path.join(generatedRoot(workspace), "vcpkg.json")),
-        await readFixtureJson("init-mingw", "vcpkg.json")
-      );
+      await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
     } else {
-      assert.match(configToml, /dependency_backend = "none"/);
       await assert.rejects(() => readText(path.join(generatedRoot(workspace), "vcpkg.json")));
       assert.deepEqual(
         (await readJson<any>(path.join(generatedRoot(workspace), "CMakePresets.json"))).configurePresets.map(

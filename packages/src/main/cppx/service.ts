@@ -79,6 +79,12 @@ export class CppxService {
       cxxPolicy.preferredFamily = "clang";
       cxxPolicy.version =
         cxxPolicy.version ?? (cxxPolicy.mode === "managed" ? "latest" : "default");
+    } else if (payload.compilerPreference === "gcc") {
+      const defaultMode = hostAdapter.getDefaultToolMode("cxx", "gcc");
+      cxxPolicy.mode = cxxPolicy.mode ?? defaultMode;
+      cxxPolicy.preferredFamily = "gcc";
+      cxxPolicy.version =
+        cxxPolicy.version ?? (cxxPolicy.mode === "managed" ? "latest" : "default");
     }
 
     if (payload.msvcInstallationPath?.trim()) {

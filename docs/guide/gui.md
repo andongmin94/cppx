@@ -27,11 +27,14 @@ GUI는 크게 `탐색`, `빌드`, `로그` 세 뷰로 나뉩니다.
   - `source_file`
   - `cxx_standard`
   - `dependency_backend`
+  - 현재 host 기본 backend를 함께 보여 주고, 필요하면 바로 다른 backend로 바꿀 수 있습니다.
   - `default_preset`
   - `target_triplet`
 - **도구 정책**
   - `cmake`, `ninja`, `vcpkg`, `conan`, `cxx` 각각에 대해 `mode`와 `version`을 편집합니다.
   - `cxx`는 `preferred_family`를 함께 저장하고, Windows에서 `MSVC`를 선택한 경우에만 `msvc_installation_path`를 편집합니다.
+  - macOS 14+에서는 `cxx`를 `managed` 또는 `system`으로 둘 다 설정할 수 있습니다.
+  - Ubuntu LTS profiles (22.04, 24.04)에서는 `preferred_family`로 `clang` 또는 `gcc`를 고를 수 있고, `cxx`를 `managed` 또는 `system`으로 둘 다 설정할 수 있습니다.
 - **CMake 설정**
   - `compile_definitions`
   - `compile_options`

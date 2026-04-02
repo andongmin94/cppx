@@ -17,6 +17,7 @@ Prepare host tools for the active platform.
 ```bash
 npm --prefix packages run cppx -- install-tools
 npm --prefix packages run cppx -- install-tools --compiler clang
+npm --prefix packages run cppx -- install-tools --compiler gcc
 npm --prefix packages run cppx -- install-tools --compiler mingw
 npm --prefix packages run cppx -- install-tools --compiler msvc --msvc-installation-path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
 ```
@@ -25,14 +26,14 @@ Options:
 
 | Option | Meaning |
 |---|---|
-| `--compiler <clang|mingw|msvc>` | Choose the compiler model for the active host |
+| `--compiler <clang|gcc|mingw|msvc>` | Choose the compiler model for the active host |
 | `--msvc-installation-path <path>` | Prefer a specific MSVC installation |
 
 Provider summary:
 
 - Windows: verified archive installs for `cmake`, `ninja`, `vcpkg`, `conan`, and the managed MinGW toolchain, plus system MSVC detection
 - macOS 14+: Homebrew for core tools and archive/bootstrap for `vcpkg`
-- Ubuntu 24.04: `apt` for `cmake`, `ninja`, `clang++`, archive/bootstrap for `vcpkg`, and `pipx` for `conan`
+- Ubuntu LTS profiles (22.04, 24.04): `apt` for `cmake`, `ninja`, and managed `clang` / `gcc`, archive/bootstrap for `vcpkg`, and `pipx` for `conan`
 - Other Linux: system detection only
 
 Pinned exact-version note:
@@ -40,12 +41,16 @@ Pinned exact-version note:
 - configure pinned versions in the GUI or `.cppx/config.toml`
 - official-host managed non-compiler tools accept exact pins
 - macOS exact pins for `cmake`, `ninja`, and `conan` use verified archive/release assets
-- Ubuntu 24.04 exact pins for `cmake` and `ninja` use verified archives, and exact `conan` pins use `pipx`
+- Ubuntu LTS profiles (22.04, 24.04) exact pins for `cmake` and `ninja` use verified archives, and exact `conan` pins use `pipx`
 - non-Windows managed `cxx` still uses floating defaults (`latest` / `default`)
+- Ubuntu LTS profiles (22.04, 24.04) managed `cxx` accepts `preferred_family = "clang"` or `preferred_family = "gcc"`
 
 Linux note:
 
-- Ubuntu 24.04 is the only official Linux managed host in this slice.
+- Ubuntu LTS profiles (22.04, 24.04) are the official Linux managed host set in this slice.
+- macOS 14+ and Ubuntu LTS profiles (22.04, 24.04) also allow `tools.cxx.mode = "system"` for the compiler already visible on `PATH`.
+- Ubuntu LTS profiles (22.04, 24.04) managed `cxx` uses `clang` or `gcc` from `apt`, depending on `preferred_family`.
+- Linux `system` compiler detection can use `clang++` or `g++` from `PATH`.
 - Unsupported Linux distributions still stay system-only.
 
 ### `init [workspace]`
@@ -63,6 +68,8 @@ Options:
 |---|---|
 | `-n, --name <name>` | Project name |
 | `--backend <vcpkg|conan|none>` | Initial dependency backend |
+
+If `--backend` is omitted, official hosts now start from `none` by default.
 
 ### `add <dependency> [workspace]`
 

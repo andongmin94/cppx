@@ -51,6 +51,14 @@ function asText(value: string | Buffer | null | undefined): string {
   return value.toString("utf-8");
 }
 
+function getExpectedSystemCompilerFamily(): "clang" | "mingw" {
+  return process.platform === "win32" ? "mingw" : "clang";
+}
+
+function getExpectedSystemCompilerBaseName(): "clang++" {
+  return "clang++";
+}
+
 test("doctor exits 1 and reports blockers when required tools are missing", async () => {
   const workspace = await createTempDir("doctor-missing");
   const hostRoot = await createTempDir("doctor-missing-host");
@@ -62,7 +70,7 @@ test("doctor exits 1 and reports blockers when required tools are missing", asyn
     config.tools.ninja.mode = "system";
     config.tools.vcpkg.mode = "system";
     config.tools.cxx.mode = "system";
-    config.tools.cxx.preferredFamily = "mingw";
+    config.tools.cxx.preferredFamily = getExpectedSystemCompilerFamily();
     await writeProjectConfigToml(workspace, config);
 
     const env = {
@@ -99,14 +107,17 @@ test("doctor exits 0 with actionable warnings when system tools are available", 
     config.tools.ninja.mode = "system";
     config.tools.vcpkg.mode = "system";
     config.tools.cxx.mode = "system";
-    config.tools.cxx.preferredFamily = "mingw";
+    config.tools.cxx.preferredFamily = getExpectedSystemCompilerFamily();
     await writeProjectConfigToml(workspace, config);
 
     const cmake = path.join(toolRoot, hostAdapter.getExecutableName("cmake"));
     const ctest = path.join(toolRoot, hostAdapter.getCtestExecutableName());
     const cpack = path.join(toolRoot, hostAdapter.getCpackExecutableName());
     const ninja = path.join(toolRoot, hostAdapter.getExecutableName("ninja"));
-    const cxx = path.join(toolRoot, hostAdapter.getExecutableName("clang++"));
+    const cxx = path.join(
+      toolRoot,
+      hostAdapter.getExecutableName(getExpectedSystemCompilerBaseName())
+    );
 
     await writeExecutable(cmake);
     await writeExecutable(ctest);

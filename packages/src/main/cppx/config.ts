@@ -32,7 +32,7 @@ const hostAdapter = getHostAdapter();
 type PartialProjectConfig = Partial<ProjectConfigPayload>;
 
 function isCompilerPreference(value: unknown): value is CompilerPreference {
-  return value === "clang" || value === "mingw" || value === "msvc";
+  return value === "clang" || value === "gcc" || value === "mingw" || value === "msvc";
 }
 
 function normalizeCompilerPreferenceForHost(
@@ -45,6 +45,10 @@ function normalizeCompilerPreferenceForHost(
 
   if (value === "mingw") {
     return hostAdapter.platform === "win32" ? "mingw" : hostAdapter.compilerFamily;
+  }
+
+  if (value === "gcc") {
+    return hostAdapter.platform === "linux" ? "gcc" : hostAdapter.compilerFamily;
   }
 
   if (value === "clang") {
@@ -232,7 +236,8 @@ function defaultCompilerPolicy(compilerFamily: CompilerFamily): CompilerToolPoli
   return {
     mode,
     version: mode === "managed" ? DEFAULT_COMPILER_VERSION : DEFAULT_MANAGED_VERSION,
-    preferredFamily: compilerFamily === "clang" ? "clang" : "mingw"
+    preferredFamily:
+      compilerFamily === "clang" ? "clang" : compilerFamily === "gcc" ? "gcc" : "mingw"
   };
 }
 
@@ -390,12 +395,20 @@ export function defaultProjectConfig(
 ): NormalizedProjectConfig {
   const targetTriplet = defaultTargetTripletForCompiler(compilerFamily);
   const targetName = createSafeTargetName(projectName);
-  const compiler =
-    compilerFamily === "msvc"
-      ? { preferredFamily: "msvc" as const }
-      : compilerFamily === "clang"
-        ? { preferredFamily: "clang" as const }
-      : { preferredFamily: "mingw" as const };
+  let compiler:
+    | { preferredFamily: "msvc" }
+    | { preferredFamily: "clang" }
+    | { preferredFamily: "gcc" }
+    | { preferredFamily: "mingw" };
+  if (compilerFamily === "msvc") {
+    compiler = { preferredFamily: "msvc" };
+  } else if (compilerFamily === "clang") {
+    compiler = { preferredFamily: "clang" };
+  } else if (compilerFamily === "gcc") {
+    compiler = { preferredFamily: "gcc" };
+  } else {
+    compiler = { preferredFamily: "mingw" };
+  }
 
   return {
     schemaVersion: CONFIG_SCHEMA_VERSION,

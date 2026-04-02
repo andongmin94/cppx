@@ -82,45 +82,101 @@ test("host support keeps macOS managed path disabled until Homebrew is available
   assert.equal(conan.install, false);
 });
 
-test("linux support narrows managed planning to Ubuntu 24.04", async () => {
-  const ubuntu = await resolveHostSupport({
+test("linux host support recognizes Ubuntu 22.04 as an official managed LTS profile", async () => {
+  const support = await resolveHostSupport({
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+    aptAvailable: true
+  });
+  const cmake = await resolveToolLifecycleCapabilities("cmake", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+    aptAvailable: true
+  });
+  const vcpkg = await resolveToolLifecycleCapabilities("vcpkg", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+    aptAvailable: true
+  });
+  const conan = await resolveToolLifecycleCapabilities("conan", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+    aptAvailable: true
+  });
+
+  assert.equal(support.tier, "official");
+  assert.equal(support.recommendedProvider, "apt");
+  assert.equal(support.managedLifecycleReady, true);
+  assert.match(support.notes.join(" "), /Ubuntu LTS profiles \(22\.04, 24\.04\)/);
+
+  assert.equal(cmake.provider, "apt");
+  assert.equal(cmake.install, true);
+  assert.equal(cmake.supportsExactPin, true);
+  assert.equal(cmake.supportsFloatingVersion, true);
+  assert.equal(cmake.versionSource, "host-provider-or-cppx-verified");
+  assert.equal(cmake.systemDetectionKind, "path-with-provider");
+
+  assert.equal(vcpkg.provider, "archive");
+  assert.equal(vcpkg.install, true);
+  assert.equal(vcpkg.supportsExactPin, true);
+  assert.equal(vcpkg.versionSource, "cppx-verified");
+
+  assert.equal(conan.provider, "pipx");
+  assert.equal(conan.install, true);
+  assert.equal(conan.supportsExactPin, true);
+  assert.equal(conan.versionSource, "upstream");
+  assert.match(conan.note ?? "", /supports exact pinned versions/);
+});
+
+test("linux host support keeps Ubuntu 24.04 as an official managed LTS profile", async () => {
+  const support = await resolveHostSupport({
     platform: "linux",
     linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
     aptAvailable: true
   });
-  const fedora = await resolveHostSupport({
-    platform: "linux",
-    linuxOsReleaseText: 'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n'
-  });
-  const ubuntuCmake = await resolveToolLifecycleCapabilities("cmake", {
-    platform: "linux",
-    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
-    aptAvailable: true
-  });
-  const ubuntuVcpkg = await resolveToolLifecycleCapabilities("vcpkg", {
-    platform: "linux",
-    linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
-    aptAvailable: true
-  });
-  const ubuntuConan = await resolveToolLifecycleCapabilities("conan", {
+  const cxx = await resolveToolLifecycleCapabilities("cxx", {
     platform: "linux",
     linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
     aptAvailable: true
   });
 
-  assert.equal(ubuntu.tier, "official");
-  assert.equal(ubuntu.recommendedProvider, "apt");
-  assert.equal(ubuntu.managedLifecycleReady, true);
-  assert.match(ubuntu.notes.join(" "), /Pinned exact versions for cmake and ninja use verified archives/);
-  assert.equal(fedora.recommendedProvider, "system");
-  assert.equal(ubuntuCmake.provider, "apt");
-  assert.equal(ubuntuCmake.install, true);
-  assert.match(ubuntuCmake.note ?? "", /verified archives for exact pinned versions/);
-  assert.equal(ubuntuVcpkg.provider, "archive");
-  assert.equal(ubuntuVcpkg.install, true);
-  assert.equal(ubuntuConan.provider, "pipx");
-  assert.equal(ubuntuConan.install, true);
-  assert.match(ubuntuConan.note ?? "", /supports exact pinned versions/);
+  assert.equal(support.tier, "official");
+  assert.equal(support.recommendedProvider, "apt");
+  assert.equal(support.managedLifecycleReady, true);
+  assert.match(support.notes.join(" "), /Pinned exact versions for cmake and ninja use verified archives/);
+  assert.equal(cxx.provider, "apt");
+  assert.equal(cxx.install, true);
+  assert.equal(cxx.supportsExactPin, false);
+  assert.equal(cxx.supportsFloatingVersion, true);
+  assert.equal(cxx.versionSource, "host-provider");
+  assert.equal(cxx.systemDetectionKind, "path-with-provider");
+  assert.match(cxx.note ?? "", /clang or gcc via apt, depending on compiler preference/);
+});
+
+test("unsupported Linux stays conservative and system-oriented", async () => {
+  const support = await resolveHostSupport({
+    platform: "linux",
+    linuxOsReleaseText: 'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n'
+  });
+  const cmake = await resolveToolLifecycleCapabilities("cmake", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n'
+  });
+  const conan = await resolveToolLifecycleCapabilities("conan", {
+    platform: "linux",
+    linuxOsReleaseText: 'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n'
+  });
+
+  assert.equal(support.tier, "best-effort");
+  assert.equal(support.recommendedProvider, "system");
+  assert.equal(support.managedLifecycleReady, false);
+  assert.match(support.notes.join(" "), /Managed Linux support is limited to Ubuntu LTS profiles \(22\.04, 24\.04\)/);
+  assert.equal(cmake.provider, "system");
+  assert.equal(cmake.install, false);
+  assert.equal(cmake.supportsExactPin, false);
+  assert.equal(cmake.versionSource, "system");
+  assert.equal(conan.provider, "system");
+  assert.equal(conan.install, false);
 });
 
 test("linux os-release parser reads quoted fields", () => {

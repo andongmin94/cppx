@@ -8,6 +8,7 @@ import {
   resolveToolLifecycleCapabilities,
   type HostSupportContext
 } from "../src/main/cppx/host-support";
+import { getSupportedLinuxManagedProfileLabel } from "../src/main/cppx/linux-profiles";
 
 type ToolExpectation = {
   provider: "archive" | "homebrew" | "apt" | "pipx" | "system";
@@ -73,6 +74,26 @@ const HOST_SUPPORT_MATRIX: HostMatrixExpectation[] = [
       vcpkg: { provider: "archive", install: true, repair: true, remove: true },
       conan: { provider: "homebrew", install: true, repair: true, remove: true },
       cxx: { provider: "homebrew", install: true, repair: true, remove: true }
+    }
+  },
+  {
+    name: "Ubuntu 22.04 official host",
+    context: {
+      platform: "linux",
+      linuxOsReleaseText: 'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
+      aptAvailable: true
+    },
+    support: {
+      tier: "official",
+      recommendedProvider: "apt",
+      managedLifecycleReady: true
+    },
+    tools: {
+      cmake: { provider: "apt", install: true, repair: true, remove: true },
+      ninja: { provider: "apt", install: true, repair: true, remove: true },
+      vcpkg: { provider: "archive", install: true, repair: true, remove: true },
+      conan: { provider: "pipx", install: true, repair: true, remove: true },
+      cxx: { provider: "apt", install: true, repair: true, remove: true }
     }
   },
   {
@@ -146,20 +167,29 @@ test("host support matrix stays aligned across official and best-effort hosts", 
 test("support docs keep the same official-host matrix wording", async () => {
   const installGuide = await readRepoText("docs", "guide", "install.md");
   const cliGuide = await readRepoText("docs", "guide", "cli.md");
+  const configGuide = await readRepoText("docs", "guide", "config.md");
   const guiGuide = await readRepoText("docs", "guide", "gui.md");
+  const indexGuide = await readRepoText("docs", "guide", "index.md");
+  const migrationGuide = await readRepoText("docs", "guide", "migration.md");
   const readme = await readRepoText("README.md");
+  const linuxProfileLabel = getSupportedLinuxManagedProfileLabel().replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
 
   assert.match(
     installGuide,
-    /\| Windows x64 \| `vcpkg` \| `managed` \| `managed` \| `managed` \| `managed` \(MinGW\) or `system` \(MSVC\) \|/
+    /\| Windows x64 \| `none` \| `managed` \| `managed` \| `managed` \| `managed` \(MinGW\) or `system` \(MSVC\) \|/
   );
   assert.match(
     installGuide,
-    /\| macOS 14\+ \| `none` \| `managed` \| `managed` \| `managed` \| `managed` \(Homebrew llvm\) \|/
+    /\| macOS 14\+ \| `none` \| `managed` \| `managed` \| `managed` \| `managed` \(Homebrew LLVM\) or `system` \(Apple Clang \/ `clang\+\+`\) \|/
   );
   assert.match(
     installGuide,
-    /\| Ubuntu 24\.04 \| `none` \| `managed` \| `managed` \| `managed` \(`pipx`\) \| `managed` \(`clang\+\+` via `apt`\) \|/
+    new RegExp(
+      `\\| ${linuxProfileLabel} \\| \`none\` \\| \`managed\` \\| \`managed\` \\| \`managed\` \\(\`pipx\`\\) \\| \`managed\` \\(\`Clang\` or \`GCC\` via \`apt\`\\) or \`system\` \\(PATH \`clang\\+\\+\` / \`g\\+\\+\`\\) \\|`
+    )
   );
   assert.match(
     installGuide,
@@ -176,9 +206,32 @@ test("support docs keep the same official-host matrix wording", async () => {
   );
   assert.match(
     cliGuide,
-    /Ubuntu 24\.04: `apt` for `cmake`, `ninja`, `clang\+\+`, archive\/bootstrap for `vcpkg`, and `pipx` for `conan`/
+    new RegExp(
+      `${linuxProfileLabel}: \`apt\` for \`cmake\`, \`ninja\`, and managed \`clang\` / \`gcc\`, archive/bootstrap for \`vcpkg\`, and \`pipx\` for \`conan\``
+    )
   );
   assert.match(cliGuide, /Other Linux: system detection only/);
+  assert.match(
+    cliGuide,
+    new RegExp(
+      `macOS 14\\+ and ${linuxProfileLabel} also allow \`tools\\.cxx\\.mode = "system"\` for the compiler already visible on \`PATH\`\\.`
+    )
+  );
+  assert.match(
+    cliGuide,
+    new RegExp(
+      `${linuxProfileLabel} managed \`cxx\` uses \`clang\` or \`gcc\` from \`apt\`, depending on \`preferred_family\`\\.`
+    )
+  );
+  assert.match(
+    cliGuide,
+    /Linux `system` compiler detection can use `clang\+\+` or `g\+\+` from `PATH`\./
+  );
+  assert.match(
+    cliGuide,
+    /If `--backend` is omitted, official hosts now start from `none` by default\./
+  );
+
   assert.match(
     installGuide,
     /Pinned exact versions are supported for official-host managed non-compiler tools/
@@ -189,7 +242,9 @@ test("support docs keep the same official-host matrix wording", async () => {
   );
   assert.match(
     installGuide,
-    /Ubuntu 24\.04: exact pins for `cmake` and `ninja` use verified archives, and `conan` uses `pipx`/
+    new RegExp(
+      `${linuxProfileLabel}: exact pins for \`cmake\` and \`ninja\` use verified archives, and \`conan\` uses \`pipx\``
+    )
   );
   assert.match(
     cliGuide,
@@ -197,8 +252,11 @@ test("support docs keep the same official-host matrix wording", async () => {
   );
   assert.match(
     cliGuide,
-    /Ubuntu 24\.04 exact pins for `cmake` and `ninja` use verified archives, and exact `conan` pins use `pipx`/
+    new RegExp(
+      `${linuxProfileLabel} exact pins for \`cmake\` and \`ninja\` use verified archives, and exact \`conan\` pins use \`pipx\``
+    )
   );
+
   assert.match(
     guiGuide,
     /`cmake`, `ninja`, `vcpkg`, `conan`, `cxx` 각각에 대해 `mode`와 `version`을 편집합니다\./
@@ -209,8 +267,57 @@ test("support docs keep the same official-host matrix wording", async () => {
   );
   assert.match(
     guiGuide,
-    /우측 `툴체인 상태` 카드에서 CMake, Ninja, vcpkg, conan, C\+\+ 컴파일러의 준비 상태와 해석된 메타데이터를 볼 수 있습니다\./
+    new RegExp(
+      `${linuxProfileLabel}에서는 \`preferred_family\`로 \`clang\` 또는 \`gcc\`를 고를 수 있고, \`cxx\`를 \`managed\` 또는 \`system\`으로 둘 다 설정할 수 있습니다\\.`
+    )
   );
+  assert.match(
+    guiGuide,
+    /툴체인 상태.*CMake, Ninja, vcpkg, conan, C\+\+ 컴파일러의 준비 상태와 해석된 메타데이터를 볼 수 있습니다\./
+  );
+
+  assert.match(configGuide, /Windows x64: backend `none`, compiler `mingw` by default/);
+  assert.match(
+    configGuide,
+    /macOS: `clang` with `managed` \(Homebrew LLVM\) or `system` \(Apple Clang \/ `clang\+\+`\)/
+  );
+  assert.match(
+    configGuide,
+    new RegExp(
+      `${linuxProfileLabel}: \`clang\` or \`gcc\` with \`managed\` \\(\`apt\`\\), or \`system\` \\(\`clang\\+\\+\` / \`g\\+\\+\` on PATH\\)`
+    )
+  );
+  assert.match(configGuide, /`preferred_family` \| `clang`, `gcc`, `mingw`, or `msvc`/);
+  assert.match(
+    configGuide,
+    new RegExp(
+      `${linuxProfileLabel} can choose \`preferred_family = "clang"\` or \`preferred_family = "gcc"\` for managed \`cxx\``
+    )
+  );
+
+  assert.match(indexGuide, /\| Default backend \| `none` \| `none` \| `none` \|/);
+  assert.match(
+    indexGuide,
+    new RegExp(
+      `\\| Default tool mode \\| managed by default, with \`cxx=system\` for MSVC \\| managed by default on official macOS hosts, with optional \`cxx=system\` \\| managed on ${linuxProfileLabel} with optional \`cxx=system\`; other Linux stays system \\|`
+    )
+  );
+  assert.match(
+    indexGuide,
+    new RegExp(`${linuxProfileLabel} use \`apt\`/\`archive\`/\`pipx\``)
+  );
+  assert.match(indexGuide, /managed `clang`\/`gcc`; other Linux stays system-only/);
+
+  assert.match(migrationGuide, /Windows \/ macOS \/ Linux 기본값: `none`/);
+  assert.match(
+    migrationGuide,
+    new RegExp(`${linuxProfileLabel}에서 managed \`clang\`과 managed \`gcc\` 중 어떤 family를 쓸지`)
+  );
+  assert.match(
+    migrationGuide,
+    new RegExp(`${linuxProfileLabel}에서 PATH \`clang\\+\\+\` / \`g\\+\\+\`를 system 모드로 그대로 쓸지`)
+  );
+
   assert.match(
     readme,
     /exact pinned versions for official-host managed non-compiler tools/

@@ -7,6 +7,7 @@ import { DEFAULT_TOOL_VERSION_TOKEN } from "./tool-catalog";
 import { CppxError } from "./errors";
 import { pathExists } from "./fs-utils";
 import { isPathManagedByApt } from "./host-support";
+import { getLinuxAptInstallRequirementNote } from "./linux-profiles";
 import type { CppxLogger } from "./logger";
 import { getHostAdapter } from "./platform";
 import { readToolManifest, upsertToolRecord } from "./paths";
@@ -64,18 +65,27 @@ function isPinnedToolVersion(version: string): boolean {
   );
 }
 
-function getAptToolSpec(tool: AptManagedTool): AptToolSpec {
+function getAptToolSpec(
+  tool: AptManagedTool,
+  compilerFamily: CompilerFamily = "clang"
+): AptToolSpec {
   switch (tool) {
     case "cmake":
       return { packageName: "cmake", executable: "cmake" };
     case "ninja":
       return { packageName: "ninja-build", executable: "ninja" };
     case "cxx":
-      return {
-        packageName: "clang",
-        executable: "clang++",
-        compilerFamily: "clang"
-      };
+      return compilerFamily === "gcc"
+        ? {
+            packageName: "g++",
+            executable: "g++",
+            compilerFamily: "gcc"
+          }
+        : {
+            packageName: "clang",
+            executable: "clang++",
+            compilerFamily: "clang"
+          };
     default: {
       const neverTool: never = tool;
       throw new CppxError(`지원하지 않는 apt 도구: ${String(neverTool)}`);
@@ -197,9 +207,10 @@ async function getAptPackageVersion(packageName: string): Promise<string | null>
 
 export async function resolveAptToolExecutable(
   tool: AptManagedTool,
-  aptExecutable: string
+  aptExecutable: string,
+  compilerFamily?: CompilerFamily
 ): Promise<ResolvedAptToolExecutable | null> {
-  const spec = getAptToolSpec(tool);
+  const spec = getAptToolSpec(tool, compilerFamily);
   const executable = (
     await resolveExecutableCandidatesFromPath([hostAdapter.getExecutableName(spec.executable)])
   ).find((candidate) => isPathManagedByApt(candidate));
@@ -239,7 +250,7 @@ export async function runAptCommand(args: string[], logger: CppxLogger): Promise
   if (!direct) {
     throw new CppxError(
       "apt-get을 찾지 못했습니다.",
-      "Ubuntu 24.04 managed 도구 설치를 사용하려면 apt-get이 필요합니다."
+      getLinuxAptInstallRequirementNote()
     );
   }
 
@@ -317,14 +328,18 @@ export async function installAptManagedTool(
   if (!aptExecutable) {
     throw new CppxError(
       "apt-get을 찾지 못했습니다.",
-      "Ubuntu 24.04 managed 도구 설치를 사용하려면 apt-get이 필요합니다."
+      getLinuxAptInstallRequirementNote()
     );
   }
 
-  const spec = getAptToolSpec(tool);
+  const compilerFamily =
+    tool === "cxx" && "preferredFamily" in policy && policy.preferredFamily === "gcc"
+      ? "gcc"
+      : "clang";
+  const spec = getAptToolSpec(tool, compilerFamily);
   const manifest = await readToolManifest();
   const existingRecord = manifest.tools[tool];
-  const existing = await resolveAptToolExecutable(tool, aptExecutable);
+  const existing = await resolveAptToolExecutable(tool, aptExecutable, compilerFamily);
 
   if (existing) {
     const ownedByCppx =
@@ -352,7 +367,7 @@ export async function installAptManagedTool(
   await ensureAptPackageIndex(logger);
   await runAptCommand(["install", "-y", spec.packageName], logger);
 
-  const installed = await resolveAptToolExecutable(tool, aptExecutable);
+  const installed = await resolveAptToolExecutable(tool, aptExecutable, compilerFamily);
   if (!installed) {
     throw new CppxError(
       `${tool} apt 설치 후 실행 파일을 찾지 못했습니다.`,
