@@ -21,10 +21,8 @@ jobs:
         os:
           - windows-latest
           - macos-latest
+          - ubuntu-22.04
           - ubuntu-24.04
-    defaults:
-      run:
-        working-directory: packages
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
@@ -34,7 +32,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: packages/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
@@ -66,7 +64,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cppx-app-${{ matrix.os }}
-          path: packages/out
+          path: out
           if-no-files-found: error
           retention-days: 7
 
@@ -224,32 +222,9 @@ jobs:
         shell: pwsh
         run: |
           $env:CPPX_SMOKE_TOOL_MODE = "managed"
-          $env:CPPX_SMOKE_CXX_MODE = "managed"
+          $env:CPPX_SMOKE_CXX_MODE = "system"
           $env:CPPX_SMOKE_BACKEND = "conan"
           $env:CPPX_SMOKE_CMAKE_VERSION = "3.30.5"
           $env:CPPX_SMOKE_NINJA_VERSION = "1.12.1"
           $env:CPPX_SMOKE_CONAN_VERSION = "2.23.0"
           node ./scripts/run-smoke-ci.mjs
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Install docs dependencies
-        run: cd docs && npm ci
-
-      - name: Build docs
-        run: cd docs && npm run docs-build
-
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: cppx-docs-site
-          path: docs/.vitepress/dist
-          if-no-files-found: error
-          retention-days: 7

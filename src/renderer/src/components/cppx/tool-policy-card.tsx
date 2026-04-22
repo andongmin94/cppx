@@ -1,5 +1,7 @@
 import type {
   CompilerPreference,
+  DependencyBackend,
+  HostSupportPayload,
   HostPlatformPayload,
   ProjectToolPoliciesPayload,
   ToolStatusDetail
@@ -19,11 +21,12 @@ import {
   type EditableToolId,
   getCxxModeGuidance,
   getCxxVersionPlaceholder,
+  getToolModeOptions,
   getToolStatusSummary,
   getToolVersionGuidance,
+  getWindowsConanCompilerGuidance,
   supportsMsvcInstallationPath,
   toolLabels,
-  toolModeOptions
 } from "./tooling";
 
 type ToolPolicyField = "mode" | "version" | "preferredFamily" | "msvcInstallationPath";
@@ -32,6 +35,8 @@ interface ToolPolicyCardProps {
   toolPolicies: Required<ProjectToolPoliciesPayload>;
   toolStatusDetails?: Partial<Record<EditableToolId, ToolStatusDetail>>;
   hostPlatform: HostPlatformPayload;
+  hostSupport: HostSupportPayload;
+  dependencyBackend: DependencyBackend;
   compilerFamilyOptions: { value: CompilerPreference; label: string }[];
   defaultCompilerPreference: CompilerPreference;
   onUpdateToolPolicy: (
@@ -45,6 +50,8 @@ export function ToolPolicyCard({
   toolPolicies,
   toolStatusDetails,
   hostPlatform,
+  hostSupport,
+  dependencyBackend,
   compilerFamilyOptions,
   defaultCompilerPreference,
   onUpdateToolPolicy
@@ -54,7 +61,12 @@ export function ToolPolicyCard({
     hostPlatform,
     compilerPreference
   );
-  const cxxModeGuidance = getCxxModeGuidance(hostPlatform);
+  const cxxModeGuidance = getCxxModeGuidance(hostSupport);
+  const windowsConanGuidance = getWindowsConanCompilerGuidance(
+    hostPlatform,
+    dependencyBackend,
+    compilerPreference
+  );
 
   return (
     <Card>
@@ -67,6 +79,7 @@ export function ToolPolicyCard({
       <CardContent className="space-y-3">
         {EDITABLE_TOOL_IDS.map((tool) => {
           const versionGuidance = getToolVersionGuidance(toolStatusDetails?.[tool]);
+          const modeOptions = getToolModeOptions(hostSupport, toolPolicies[tool].mode);
 
           return (
             <div
@@ -90,7 +103,7 @@ export function ToolPolicyCard({
                       <SelectValue placeholder="mode 선택" />
                     </SelectTrigger>
                     <SelectContent>
-                      {toolModeOptions.map((option) => (
+                      {modeOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -137,6 +150,9 @@ export function ToolPolicyCard({
                     </Select>
                     {cxxModeGuidance && (
                       <p className="text-[11px] text-muted-foreground">{cxxModeGuidance}</p>
+                    )}
+                    {windowsConanGuidance && (
+                      <p className="text-[11px] text-amber-700">{windowsConanGuidance}</p>
                     )}
                   </div>
                   {showMsvcInstallationPath && (

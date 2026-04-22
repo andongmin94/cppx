@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { CppxError } from "../src/main/cppx/errors";
+import { inferArchiveCacheName } from "../src/main/cppx/installer-archive";
 import { verifyFileChecksumOrThrow } from "../src/main/cppx/installers";
 import {
   createTempDir,
@@ -57,4 +58,28 @@ test("verifyFileChecksumOrThrow deletes mismatched files and reports both digest
   } finally {
     await removeDir(workspace);
   }
+});
+
+test("inferArchiveCacheName ignores dotted tag paths and keeps a real archive extension", () => {
+  assert.equal(
+    inferArchiveCacheName("vcpkg", {
+      version: "2026.02.27",
+      urls: ["https://codeload.github.com/microsoft/vcpkg/zip/refs/tags/2026.02.27"],
+      executable: "vcpkg.exe",
+      sourceKind: "catalog-archive",
+      requestedVersion: "2026.02.27"
+    }),
+    "vcpkg-2026.02.27.zip"
+  );
+
+  assert.equal(
+    inferArchiveCacheName("cmake", {
+      version: "4.2.3",
+      urls: ["https://cmake.org/files/v4.2/cmake-4.2.3-macos-universal.tar.gz"],
+      executable: "cmake",
+      sourceKind: "catalog-archive",
+      requestedVersion: "4.2.3"
+    }),
+    "cmake-4.2.3-macos-universal.tar.gz"
+  );
 });

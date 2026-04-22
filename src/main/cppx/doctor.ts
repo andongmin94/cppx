@@ -26,7 +26,7 @@ import {
 } from "./workspace-layout";
 
 const hostAdapter = getHostAdapter();
-const REPO_CPPX_COMMAND = "npm --prefix packages run cppx --";
+const REPO_CPPX_COMMAND = "npm run cppx --";
 
 export type DoctorSeverity = "ok" | "warning" | "blocking";
 
@@ -411,6 +411,24 @@ export async function runDoctor(
         severity: "ok",
         summary: `active backend=conan 준비됨 (${toolSnapshot.conan.executable})`
       });
+
+      const resolvedCompilerFamily =
+        toolSnapshot.cxx.compilerFamily ?? configSummary.compilerFamily;
+      if (process.platform === "win32" && resolvedCompilerFamily !== "msvc") {
+        checks.push({
+          key: "backend-conan-compiler",
+          label: "backend/compiler",
+          severity: "blocking",
+          summary: "Windows에서 conan backend는 현재 MSVC compiler path로 검증됩니다.",
+          details:
+            `현재 compiler family=${resolvedCompilerFamily}. ` +
+            'managed Conan은 준비되어 있어도 build/test/pack은 preferred_family = "msvc"와 system MSVC 경로로 맞춰야 합니다.'
+        });
+        addNextStep(
+          nextSteps,
+          'Windows에서 conan backend를 쓸 때는 preferred_family = "msvc"와 mode = "system"으로 맞추고 필요하면 msvc_installation_path를 저장하세요.'
+        );
+      }
     }
   } else {
     checks.push({

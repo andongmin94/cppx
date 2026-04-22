@@ -37,13 +37,14 @@ function printLog(entry: LogEntry): void {
 const service = new CppxService(printLog);
 const program = new Command();
 const hostAdapter = getHostAdapter();
-const REPO_CPPX_COMMAND = "npm --prefix packages run cppx --";
+const REPO_CPPX_COMMAND = "npm run cppx --";
 
 interface WorkspaceConfigSummary {
   exists: boolean;
   dependencyBackend?: DependencyBackend;
   schemaVersion?: number;
   targetName?: string;
+  compilerFamily?: "clang" | "gcc" | "mingw" | "msvc";
 }
 
 async function execute(payload: RunCommandPayload): Promise<RunCommandResult> {
@@ -71,7 +72,11 @@ async function readWorkspaceConfigSummary(workspaceRaw: string): Promise<Workspa
     exists: true,
     dependencyBackend: parsed.dependencyBackend,
     schemaVersion: parsed.schemaVersion,
-    targetName: parsed.targetName
+    targetName: parsed.targetName,
+    compilerFamily:
+      parsed.tools.cxx.preferredFamily ??
+      parsed.compiler.preferredFamily ??
+      hostAdapter.compilerFamily
   };
 }
 
@@ -95,6 +100,11 @@ function printInitGuidance(workspaceRaw: string, config: WorkspaceConfigSummary)
   }
   if (config.dependencyBackend === "conan") {
     console.log("hint: conan backend를 쓰려면 conan 명령이 PATH에 있어야 합니다.");
+    if (hostAdapter.platform === "win32" && config.compilerFamily !== "msvc") {
+      console.log(
+        'hint: Windows conan backend는 현재 system MSVC compiler path 기준으로 검증됩니다. preferred_family = "msvc"가 더 안전합니다.'
+      );
+    }
   }
 }
 
@@ -115,6 +125,14 @@ function printStatusGuidance(
     if (config.dependencyBackend === "none") {
       console.log(
         `hint: dependency_backend = "none"이라 cppx add는 비활성화됩니다. 의존성이 필요하면 conan 또는 vcpkg로 바꾸세요.`
+      );
+    } else if (
+      hostAdapter.platform === "win32" &&
+      config.dependencyBackend === "conan" &&
+      config.compilerFamily !== "msvc"
+    ) {
+      console.log(
+        'hint: Windows conan backend는 현재 system MSVC compiler path 기준으로 검증됩니다. preferred_family = "msvc"가 더 안전합니다.'
       );
     }
   } else {

@@ -32,7 +32,9 @@ import { PresetMatrixCard } from "@renderer/components/cppx/preset-matrix-card";
 import { ToolPolicyCard } from "@renderer/components/cppx/tool-policy-card";
 import { ToolchainStatusCard } from "@renderer/components/cppx/toolchain-status-card";
 import {
+  getDependencyBackendValue,
   getDefaultCompilerPreference,
+  getTargetTripletPlaceholder,
   INSTALL_TOOL_ORDER,
   supportsMsvcInstallationPath,
   type EditableToolId,
@@ -1060,7 +1062,9 @@ export default function App() {
         : config.defaultPreset
     );
     setProjectDependencies(config.dependencies);
-    setDependencyBackend(config.dependencyBackend ?? "vcpkg");
+    setDependencyBackend(
+      getDependencyBackendValue(config.dependencyBackend, hostDefaults.dependencyBackend)
+    );
     setSourceFile(config.sourceFile);
     setCxxStandardInput(String(config.cxxStandard));
     setTargetTriplet(config.targetTriplet);
@@ -1640,7 +1644,7 @@ export default function App() {
                         id="target-triplet"
                         value={targetTriplet}
                         onChange={(event) => setTargetTriplet(event.target.value)}
-                        placeholder="x64-mingw-dynamic / x64-windows / x64-osx / x64-linux"
+                        placeholder={getTargetTripletPlaceholder(hostDefaults.platform)}
                       />
                     </div>
                   </CardContent>
@@ -1650,6 +1654,8 @@ export default function App() {
                   toolPolicies={toolPolicies}
                   toolStatusDetails={toolStatus.details}
                   hostPlatform={hostDefaults.platform}
+                  hostSupport={hostDefaults.hostSupport}
+                  dependencyBackend={dependencyBackend}
                   compilerFamilyOptions={compilerFamilyOptions}
                   defaultCompilerPreference={getDefaultCompilerPreference(hostDefaults.platform)}
                   onUpdateToolPolicy={updateToolPolicy}

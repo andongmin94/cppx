@@ -150,3 +150,56 @@ test("doctor exits 0 with actionable warnings when system tools are available", 
     await removeDir(toolRoot);
   }
 });
+
+if (process.platform === "win32") {
+  test("doctor blocks Windows conan projects that still point at MinGW", async () => {
+    const workspace = await createTempDir("doctor-conan-mingw");
+    const hostRoot = await createTempDir("doctor-conan-mingw-host");
+    const toolRoot = await createTempDir("doctor-conan-mingw-tools");
+    const hostAdapter = getHostAdapter();
+
+    try {
+      const config = defaultProjectConfig("doctor-conan-mingw");
+      config.dependencyBackend = "conan";
+      config.tools.cmake.mode = "system";
+      config.tools.ninja.mode = "system";
+      config.tools.conan.mode = "system";
+      config.tools.cxx.mode = "system";
+      config.tools.cxx.preferredFamily = "mingw";
+      await writeProjectConfigToml(workspace, config);
+
+      const cmake = path.join(toolRoot, hostAdapter.getExecutableName("cmake"));
+      const ctest = path.join(toolRoot, hostAdapter.getCtestExecutableName());
+      const cpack = path.join(toolRoot, hostAdapter.getCpackExecutableName());
+      const ninja = path.join(toolRoot, hostAdapter.getExecutableName("ninja"));
+      const conan = path.join(toolRoot, hostAdapter.getExecutableName("conan"));
+      const cxx = path.join(toolRoot, hostAdapter.getExecutableName("clang++"));
+
+      await writeExecutable(cmake);
+      await writeExecutable(ctest);
+      await writeExecutable(cpack);
+      await writeExecutable(ninja);
+      await writeExecutable(conan);
+      await writeExecutable(cxx);
+
+      const env = {
+        ...process.env,
+        ...createHostDataEnv(hostRoot),
+        PATH: `${toolRoot}${hostAdapter.getPathSeparator()}${process.env.PATH ?? ""}`
+      };
+
+      const result = runDoctorCli(workspace, env);
+
+      const stdout = asText(result.stdout);
+      const stderr = asText(result.stderr);
+      assert.equal(result.status, 1, stderr || stdout);
+      assert.match(stdout, /\[OK\] backend: active backend=conan 준비됨/);
+      assert.match(stdout, /\[BLOCKER\] backend\/compiler: Windows에서 conan backend는 현재 MSVC compiler path로 검증됩니다/);
+      assert.match(stdout, /preferred_family = "msvc"/);
+    } finally {
+      await removeDir(workspace);
+      await removeDir(hostRoot);
+      await removeDir(toolRoot);
+    }
+  });
+}

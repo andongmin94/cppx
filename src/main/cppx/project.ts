@@ -199,7 +199,7 @@ async function removeStaleGeneratedFiles(
   relativePaths: string[]
 ): Promise<void> {
   for (const relativePath of relativePaths) {
-    await fs.rm(path.join(generatedRoot, relativePath), { force: true });
+    await fs.rm(path.join(generatedRoot, relativePath), { recursive: true, force: true });
   }
 }
 

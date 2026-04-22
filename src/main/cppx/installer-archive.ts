@@ -159,7 +159,20 @@ function sanitizeVersionToken(version: string): string {
   return version.replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
-function inferArchiveCacheName(tool: ToolName, source: ArchiveToolSource): string {
+const SUPPORTED_ARCHIVE_EXTENSIONS = [
+  ".zip",
+  ".tar.gz",
+  ".tgz",
+  ".tar.xz",
+  ".tar.bz2"
+] as const;
+
+function hasSupportedArchiveExtension(fileName: string): boolean {
+  const lowered = fileName.toLowerCase();
+  return SUPPORTED_ARCHIVE_EXTENSIONS.some((extension) => lowered.endsWith(extension));
+}
+
+export function inferArchiveCacheName(tool: ToolName, source: ArchiveToolSource): string {
   if (source.archiveFileName?.trim()) {
     return source.archiveFileName.trim();
   }
@@ -167,7 +180,7 @@ function inferArchiveCacheName(tool: ToolName, source: ArchiveToolSource): strin
   for (const url of source.urls) {
     try {
       const name = path.basename(new URL(url).pathname);
-      if (name.includes(".")) {
+      if (hasSupportedArchiveExtension(name)) {
         return name;
       }
     } catch {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import process from "node:process";
 import test from "node:test";
 import {
   initProject,
@@ -67,11 +68,11 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
       );
       assert.equal(
         presets.configurePresets[0].toolchainFile,
-        "${sourceDir}/build/Debug/generators/conan_toolchain.cmake"
+        "${sourceDir}/.conan/asan-x64/build/Debug/generators/conan_toolchain.cmake"
       );
       assert.equal(
         presets.configurePresets[1].toolchainFile,
-        "${sourceDir}/build/Release/generators/conan_toolchain.cmake"
+        "${sourceDir}/.conan/release-lto/build/Release/generators/conan_toolchain.cmake"
       );
       assert.equal(
         presets.configurePresets[0].cacheVariables.CMAKE_BUILD_TYPE,
@@ -85,16 +86,28 @@ test("syncGeneratedFiles supports conan backend and custom preset matrix", async
       const tasks = await readJson<any>(path.join(workspace, ".vscode", "tasks.json"));
       const labels = tasks.tasks.map((task: any) => task.label);
       const conanProfile = tasks.tasks.find((task: any) => task.label === "cppx: conan profile");
+      const conanAsan = tasks.tasks.find((task: any) => task.label === "cppx: deps conan asan-x64");
+      const conanRelease = tasks.tasks.find((task: any) => task.label === "cppx: deps conan release-lto");
       const configureAsan = tasks.tasks.find((task: any) => task.label === "cppx: configure asan-x64");
-      assert.deepEqual(labels.slice(0, 3), [
+      assert.deepEqual(labels.slice(0, 4), [
         "cppx: conan profile",
-        "cppx: deps conan",
+        "cppx: deps conan asan-x64",
+        "cppx: deps conan release-lto",
         "cppx: configure asan-x64"
       ]);
       assert.equal(conanProfile.command, "conan profile detect --force");
+      assert.equal(
+        conanAsan.command,
+        `conan install . --output-folder .conan/asan-x64 --build missing -s build_type=Debug${process.platform === "win32" ? " -c tools.cmake.cmaketoolchain:generator=Ninja" : ""}`
+      );
+      assert.equal(
+        conanRelease.command,
+        `conan install . --output-folder .conan/release-lto --build missing -s build_type=Release${process.platform === "win32" ? " -c tools.cmake.cmaketoolchain:generator=Ninja" : ""}`
+      );
       assert.deepEqual(configureAsan.dependsOn, [
         "cppx: conan profile",
-        "cppx: deps conan"
+        "cppx: deps conan asan-x64",
+        "cppx: deps conan release-lto"
       ]);
       assert.match(JSON.stringify(tasks), /build release-lto/);
       assert.match(JSON.stringify(tasks), /run asan-x64/);

@@ -29,6 +29,12 @@ export interface BackendPresetIntegration {
   environment: Record<string, string>;
 }
 
+interface BackendPresetDescriptor {
+  name?: string;
+  targetTriplet?: string;
+  buildType?: string;
+}
+
 export interface DependencyBackendAdapter {
   readonly id: NormalizedProjectConfig["dependencyBackend"];
 
@@ -38,7 +44,7 @@ export interface DependencyBackendAdapter {
   getPresetIntegration(
     config: NormalizedProjectConfig,
     toolchain: Toolchain,
-    preset: { targetTriplet?: string; buildType?: string }
+    preset: BackendPresetDescriptor
   ): BackendPresetIntegration;
   getBuildEnv(
     config: NormalizedProjectConfig,
@@ -51,7 +57,7 @@ export interface DependencyBackendAdapter {
     toolchain: Toolchain,
     generatedRoot: string,
     logger: CppxLogger,
-    preset: { targetTriplet?: string; buildType?: string }
+    preset: BackendPresetDescriptor
   ): Promise<void>;
 }
 
@@ -76,6 +82,36 @@ cmake_layout
 `;
 }
 
+function getConanOutputRelativePath(preset: BackendPresetDescriptor): string {
+  return path.join(".conan", preset.name ?? "default");
+}
+
+function getConanInstallArgs(preset: BackendPresetDescriptor): string[] {
+  return [
+    "install",
+    ".",
+    "--output-folder",
+    getConanOutputRelativePath(preset).replaceAll("\\", "/"),
+    "--build",
+    "missing",
+    ...(preset.buildType ? ["-s", `build_type=${preset.buildType}`] : []),
+    ...(process.platform === "win32"
+      ? ["-c", "tools.cmake.cmaketoolchain:generator=Ninja"]
+      : [])
+  ];
+}
+
+function validateWindowsConanCompiler(toolchain: Toolchain): void {
+  if (process.platform !== "win32" || toolchain.compilerFamily === "msvc") {
+    return;
+  }
+
+  throw new CppxError(
+    "Windows에서 conan backend는 현재 MSVC compiler path로만 검증됩니다.",
+    'Windows Conan은 managed conan + system MSVC 조합으로 검증되었습니다. preferred_family = "msvc"와 system 모드로 맞춘 뒤 다시 시도하세요.'
+  );
+}
+
 const vcpkgBackend: DependencyBackendAdapter = {
   id: "vcpkg",
 
@@ -90,7 +126,7 @@ const vcpkgBackend: DependencyBackendAdapter = {
   },
 
   getStaleGeneratedFiles() {
-    return ["conanfile.txt", "conan_toolchain.cmake", "CMakeUserPresets.json"];
+    return ["conanfile.txt", "conan_toolchain.cmake", "CMakeUserPresets.json", ".conan", "build"];
   },
 
   getPresetIntegration(config, toolchain, preset) {
@@ -148,13 +184,13 @@ const conanBackend: DependencyBackendAdapter = {
   },
 
   getStaleGeneratedFiles() {
-    return ["vcpkg.json"];
+    return ["vcpkg.json", "conan_toolchain.cmake", "CMakeUserPresets.json", "build"];
   },
 
   getPresetIntegration(_config, _toolchain, preset) {
     const buildType = preset.buildType ?? "Release";
     return {
-      toolchainFile: `\${sourceDir}/build/${buildType}/generators/conan_toolchain.cmake`,
+      toolchainFile: `\${sourceDir}/${getConanOutputRelativePath(preset).replaceAll("\\", "/")}/build/${buildType}/generators/conan_toolchain.cmake`,
       cacheVariables: {},
       environment: {}
     };
@@ -164,9 +200,20 @@ const conanBackend: DependencyBackendAdapter = {
     return {};
   },
 
-  getVSCodeIntegration() {
+  getVSCodeIntegration(config) {
+    const conanInstallTasks = config.presets.map((preset) => ({
+      label: `cppx: deps conan ${preset.name}`,
+      type: "shell" as const,
+      command: `conan ${getConanInstallArgs(preset).join(" ")}`,
+      options: { cwd: VSCODE_GENERATED_ROOT },
+      group: "build" as const
+    }));
+
     return {
-      configureDependsOn: ["cppx: conan profile", "cppx: deps conan"],
+      configureDependsOn: [
+        "cppx: conan profile",
+        ...conanInstallTasks.map((task) => task.label)
+      ],
       tasks: [
         {
           label: "cppx: conan profile",
@@ -175,13 +222,7 @@ const conanBackend: DependencyBackendAdapter = {
           options: { cwd: VSCODE_GENERATED_ROOT },
           group: "build"
         },
-        {
-          label: "cppx: deps conan",
-          type: "shell",
-          command: "conan install . --output-folder . --build missing",
-          options: { cwd: VSCODE_GENERATED_ROOT },
-          group: "build"
-        }
+        ...conanInstallTasks
       ]
     };
   },
@@ -190,6 +231,8 @@ const conanBackend: DependencyBackendAdapter = {
     if (!_toolchain.conan) {
       throw new CppxError("conan backend를 사용하려면 conan 실행 파일이 필요합니다.");
     }
+
+    validateWindowsConanCompiler(_toolchain);
 
     await runSpawn(
       {
@@ -204,15 +247,7 @@ const conanBackend: DependencyBackendAdapter = {
       {
         action: "build",
         command: _toolchain.conan,
-        args: [
-          "install",
-          ".",
-          "--output-folder",
-          ".",
-          "--build",
-          "missing",
-          ...(preset.buildType ? ["-s", `build_type=${preset.buildType}`] : [])
-        ],
+        args: getConanInstallArgs(preset),
         cwd: generatedRoot
       },
       logger
@@ -235,7 +270,7 @@ const noneBackend: DependencyBackendAdapter = {
   },
 
   getStaleGeneratedFiles() {
-    return ["vcpkg.json", "conanfile.txt", "conan_toolchain.cmake", "CMakeUserPresets.json"];
+    return ["vcpkg.json", "conanfile.txt", "conan_toolchain.cmake", "CMakeUserPresets.json", ".conan", "build"];
   },
 
   getPresetIntegration() {

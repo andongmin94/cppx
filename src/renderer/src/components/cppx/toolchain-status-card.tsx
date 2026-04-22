@@ -14,6 +14,7 @@ import {
   type InstallProgressStatus,
   type InstallToolKey,
   type InstallToolProgress,
+  getToolchainInstallGuidance,
   getToolCapabilityNote,
   getToolStatusSummary
 } from "./tooling";
@@ -115,15 +116,7 @@ export function ToolchainStatusCard({
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          {hostSupport.managedLifecycleReady ? (
-            <>
-              도구 누락 상태에서는 <code className="font-mono">install-tools</code>를 먼저 실행하는 것이 안전합니다.
-            </>
-          ) : (
-            <>
-              이 host에서는 일부 도구가 아직 system 설치를 먼저 필요로 합니다. 각 툴 행의 lifecycle 안내와 <code className="font-mono">doctor</code> 출력을 확인하세요.
-            </>
-          )}
+          {getToolchainInstallGuidance(hostSupport)}
         </p>
       </CardContent>
     </Card>
