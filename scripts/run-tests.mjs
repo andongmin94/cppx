@@ -31,7 +31,7 @@ async function collectTestFiles(rootDir) {
 const testFiles = (await collectTestFiles(testRoot)).sort();
 
 if (testFiles.length === 0) {
-  console.error("No test files found under packages/test.");
+  console.error("No test files found under test.");
   process.exit(1);
 }
 
