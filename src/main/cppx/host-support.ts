@@ -19,7 +19,7 @@ import {
   getLinuxManagedHostNotes,
   getLinuxManagedSupportLimitNote,
   getLinuxManagedVcpkgNote,
-  getUnsupportedLinuxSystemModeNote,
+  getUnsupportedLinuxHostNote,
   parseLinuxOsRelease,
   resolveLinuxHostProfile,
   type LinuxHostProfile,
@@ -127,12 +127,12 @@ const LINUX_PIPX_METADATA: LifecycleMetadata = {
   systemDetectionKind: "path-with-provider"
 };
 
-const SYSTEM_ONLY_METADATA: LifecycleMetadata = {
+const UNSUPPORTED_METADATA: LifecycleMetadata = {
   supportsExactPin: false,
   supportsFloatingVersion: false,
   supportsInstanceSelection: false,
-  versionSource: "system",
-  systemDetectionKind: "path-with-provider"
+  versionSource: "unknown",
+  systemDetectionKind: "none"
 };
 
 function getDefaultHomebrewPrefix(arch: string): string {
@@ -312,6 +312,15 @@ function createUnavailableLifecycle(
   );
 }
 
+function createUnsupportedLifecycle(note: string): ToolLifecycleCapabilities {
+  return createLifecycleCapabilities(
+    "unknown",
+    { detect: false, install: false, repair: false, remove: false },
+    UNSUPPORTED_METADATA,
+    note
+  );
+}
+
 function getLinuxProfileFromSupport(
   support: Pick<HostSupportPayload, "arch" | "distroId" | "distroVersion">
 ): LinuxHostProfile | undefined {
@@ -458,12 +467,12 @@ export async function resolveHostSupport(
     hostLabel:
       release?.prettyName ??
       (distroId ? `Linux (${distroId}${distroVersion ? ` ${distroVersion}` : ""})` : `Linux ${arch}`),
-    tier: "best-effort",
+    tier: "unsupported",
     managedLifecycleReady: false,
-    recommendedProvider: "system",
+    recommendedProvider: "unknown",
     distroId,
     distroVersion,
-    notes: [getLinuxManagedSupportLimitNote(), getUnsupportedLinuxSystemModeNote()]
+    notes: [getLinuxManagedSupportLimitNote(), getUnsupportedLinuxHostNote()]
   };
 }
 
@@ -573,85 +582,64 @@ export async function resolveToolLifecycleCapabilities(
   if (support.platform === "linux") {
     const linuxProfile = getLinuxProfileFromSupport(support);
 
-    if (tool === "vcpkg") {
-      if (linuxProfile) {
-        return createLifecycleCapabilities(
-          "archive",
-          { detect: true, install: true, repair: true, remove: true },
-          VERIFIED_ARCHIVE_METADATA,
-          getLinuxManagedVcpkgNote(linuxProfile)
-        );
-      }
+    if (!linuxProfile) {
+      return createUnsupportedLifecycle(
+        `${getLinuxManagedSupportLimitNote()} ${getUnsupportedLinuxHostNote()}`
+      );
+    }
 
-      return createUnavailableLifecycle(
+    if (tool === "vcpkg") {
+      return createLifecycleCapabilities(
         "archive",
-        getVersionMetadata("cppx-verified", "path", {
-          supportsExactPin: false,
-          supportsFloatingVersion: false
-        }),
-        getLinuxManagedSupportLimitNote()
+        { detect: true, install: true, repair: true, remove: true },
+        VERIFIED_ARCHIVE_METADATA,
+        getLinuxManagedVcpkgNote(linuxProfile)
       );
     }
 
     if (tool === "conan") {
-      if (linuxProfile) {
-        if (support.managedLifecycleReady) {
-          return createLifecycleCapabilities(
-            "pipx",
-            { detect: true, install: true, repair: true, remove: true },
-            LINUX_PIPX_METADATA,
-            getLinuxManagedConanNote(linuxProfile)
-          );
-        }
-
-        return createUnavailableLifecycle(
-          "pipx",
-          getVersionMetadata("upstream", "path-with-provider", {
-            supportsExactPin: false,
-            supportsFloatingVersion: false
-          }),
-          getLinuxAptLifecycleRequirementNote(linuxProfile)
-        );
-      }
-
-      return createUnavailableLifecycle(
-        "system",
-        SYSTEM_ONLY_METADATA,
-        "Unsupported Linux distributions use system conan only."
-      );
-    }
-
-    if (linuxProfile) {
       if (support.managedLifecycleReady) {
         return createLifecycleCapabilities(
-          "apt",
+          "pipx",
           { detect: true, install: true, repair: true, remove: true },
-          tool === "cxx" ? LINUX_CXX_METADATA : LINUX_APT_METADATA,
-          tool === "cxx"
-            ? getLinuxManagedCxxNote(linuxProfile)
-            : getLinuxManagedCoreToolNote(linuxProfile)
+          LINUX_PIPX_METADATA,
+          getLinuxManagedConanNote(linuxProfile)
         );
       }
 
       return createUnavailableLifecycle(
-        "apt",
-        tool === "cxx"
-          ? getVersionMetadata("host-provider", "path-with-provider", {
-              supportsExactPin: false,
-              supportsFloatingVersion: false
-            })
-          : getVersionMetadata("host-provider-or-cppx-verified", "path-with-provider", {
-              supportsExactPin: false,
-              supportsFloatingVersion: false
-            }),
+        "pipx",
+        getVersionMetadata("upstream", "path-with-provider", {
+          supportsExactPin: false,
+          supportsFloatingVersion: false
+        }),
         getLinuxAptLifecycleRequirementNote(linuxProfile)
       );
     }
 
+    if (support.managedLifecycleReady) {
+      return createLifecycleCapabilities(
+        "apt",
+        { detect: true, install: true, repair: true, remove: true },
+        tool === "cxx" ? LINUX_CXX_METADATA : LINUX_APT_METADATA,
+        tool === "cxx"
+          ? getLinuxManagedCxxNote(linuxProfile)
+          : getLinuxManagedCoreToolNote(linuxProfile)
+      );
+    }
+
     return createUnavailableLifecycle(
-      "system",
-      SYSTEM_ONLY_METADATA,
-      getLinuxManagedSupportLimitNote()
+      "apt",
+      tool === "cxx"
+        ? getVersionMetadata("host-provider", "path-with-provider", {
+            supportsExactPin: false,
+            supportsFloatingVersion: false
+          })
+        : getVersionMetadata("host-provider-or-cppx-verified", "path-with-provider", {
+            supportsExactPin: false,
+            supportsFloatingVersion: false
+          }),
+      getLinuxAptLifecycleRequirementNote(linuxProfile)
     );
   }
 

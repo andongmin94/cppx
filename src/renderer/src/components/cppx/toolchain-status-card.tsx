@@ -96,7 +96,7 @@ export function ToolchainStatusCard({
           <Button
             className={installButtonClassName}
             onClick={onInstallTools}
-            disabled={busy}
+            disabled={busy || hostSupport.tier === "unsupported"}
           >
             {installButtonStatus === "running" ? (
               <Loader2 className="h-4 w-4 animate-spin" />

@@ -87,6 +87,7 @@ test("loadProjectConfig reads schema v2 fields and normalizes them", async () =>
     assert.equal(config.cxxStandard, 23);
     assert.equal(config.targetTriplet, "x64-windows");
     assert.equal(config.dependencyBackend, "conan");
+    assert.equal(config.toolchain?.strategy, "recommended");
     assert.deepEqual(config.dependencies, ["fmt", "spdlog"]);
     assert.deepEqual(config.cmake.compileDefinitions, ["USE_SSL", "APP_VERSION=1"]);
     assert.deepEqual(config.cmake.compileOptions, ["-Wall", "-Wextra"]);
@@ -123,7 +124,7 @@ test("loadProjectConfig reads schema v2 fields and normalizes them", async () =>
   }
 });
 
-test("saveProjectConfig upgrades writable configs to schema v3 while keeping v2 fields readable", async () => {
+test("saveProjectConfig upgrades writable configs to schema v4 while keeping v2 fields readable", async () => {
   const localAppData = await createTempDir("config-v2-save-root");
   const workspace = await createTempDir("config-v2-save");
   const { logger } = createLogger();
@@ -178,8 +179,9 @@ test("saveProjectConfig upgrades writable configs to schema v3 while keeping v2 
         }
       });
 
-      assert.equal(saved.schemaVersion, 3);
+      assert.equal(saved.schemaVersion, 4);
       assert.equal(saved.dependencyBackend, "conan");
+      assert.equal(saved.toolchain?.strategy, "recommended");
       assert.equal(saved.compiler?.preferredFamily, "msvc");
       assert.equal(saved.compiler?.msvcInstallationPath, "C:\\VS\\BuildTools");
       assert.equal(saved.tools?.cmake?.mode, "managed");
@@ -208,8 +210,9 @@ test("saveProjectConfig upgrades writable configs to schema v3 while keeping v2 
       ]);
 
       const reloaded = await loadProjectConfig(workspace);
-      assert.equal(reloaded.schemaVersion, 3);
+      assert.equal(reloaded.schemaVersion, 4);
       assert.equal(reloaded.dependencyBackend, "conan");
+      assert.equal(reloaded.toolchain?.strategy, "recommended");
       assert.equal(reloaded.compiler?.preferredFamily, "msvc");
       assert.equal(reloaded.compiler?.msvcInstallationPath, "C:\\VS\\BuildTools");
       assert.equal(reloaded.tools?.cmake?.mode, "managed");
@@ -243,9 +246,9 @@ test("saveProjectConfig upgrades writable configs to schema v3 while keeping v2 
   }
 });
 
-test("saveProjectConfig persists schema v3 target_name and package metadata", async () => {
-  const localAppData = await createTempDir("config-v3-root");
-  const workspace = await createTempDir("config-v3");
+test("saveProjectConfig persists schema v4 target_name, package metadata, and toolchain strategy", async () => {
+  const localAppData = await createTempDir("config-v4-root");
+  const workspace = await createTempDir("config-v4");
   const { logger } = createLogger();
 
   try {
@@ -265,11 +268,15 @@ test("saveProjectConfig persists schema v3 target_name and package metadata", as
           licenseFile: "LICENSE.txt",
           readmeFile: "README.md",
           icon: "assets/icon.png"
+        },
+        toolchain: {
+          strategy: "system"
         }
       });
 
-      assert.equal(saved.schemaVersion, 3);
+      assert.equal(saved.schemaVersion, 4);
       assert.equal(saved.targetName, "fancy_app");
+      assert.equal(saved.toolchain?.strategy, "system");
       assert.equal(saved.package?.version, "1.2.3-beta.1");
       assert.equal(saved.package?.vendor, "Acme Tools");
       assert.deepEqual(saved.package?.generators, ["ZIP", "TGZ"]);
@@ -279,8 +286,9 @@ test("saveProjectConfig persists schema v3 target_name and package metadata", as
       assert.equal(saved.package?.icon, "assets/icon.png");
 
       const reloaded = await loadProjectConfig(workspace);
-      assert.equal(reloaded.schemaVersion, 3);
+      assert.equal(reloaded.schemaVersion, 4);
       assert.equal(reloaded.targetName, "fancy_app");
+      assert.equal(reloaded.toolchain?.strategy, "system");
       assert.equal(reloaded.package?.version, "1.2.3-beta.1");
       assert.equal(reloaded.package?.vendor, "Acme Tools");
       assert.deepEqual(reloaded.package?.generators, ["ZIP", "TGZ"]);

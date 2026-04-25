@@ -15,7 +15,8 @@ import type {
   RunCommandPayload,
   RunCommandResult,
   ToolLifecycleCapabilities,
-  ToolStatus
+  ToolStatus,
+  ToolchainStrategy
 } from "@shared/contracts";
 import {
   BuildActionPanel
@@ -119,6 +120,13 @@ const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = 
   { value: "vcpkg", label: "vcpkg" },
   { value: "conan", label: "conan" },
   { value: "none", label: "none" }
+];
+
+const toolchainStrategyOptions: { value: ToolchainStrategy; label: string }[] = [
+  { value: "recommended", label: "recommended" },
+  { value: "portable", label: "portable" },
+  { value: "provider", label: "provider" },
+  { value: "system", label: "system" }
 ];
 
 const INSTALL_TOOL_DONE_PATTERNS: Record<InstallToolKey, string[]> = {
@@ -533,6 +541,9 @@ function createLoadingHostDefaults(): HostDefaultsPayload {
     platform,
     defaultPreset: `debug-${detectRendererArch()}`,
     dependencyBackend: "none",
+    toolchain: {
+      strategy: "recommended"
+    },
     toolPolicies: createLoadingToolPolicies(platform),
     hostSupport: createLoadingHostSupport(platform),
     toolCapabilities: createLoadingToolCapabilities()
@@ -717,6 +728,9 @@ export default function App() {
   const [buildPreset, setBuildPreset] = useState(hostDefaults.defaultPreset);
   const [dependencyBackend, setDependencyBackend] = useState<DependencyBackend>(
     hostDefaults.dependencyBackend
+  );
+  const [toolchainStrategy, setToolchainStrategy] = useState<ToolchainStrategy>(
+    hostDefaults.toolchain.strategy
   );
   const [sourceFile, setSourceFile] = useState("src/main.cpp");
   const [cxxStandardInput, setCxxStandardInput] = useState("20");
@@ -1023,6 +1037,7 @@ export default function App() {
     setPreset(defaults.defaultPreset);
     setBuildPreset(defaults.defaultPreset);
     setDependencyBackend(defaults.dependencyBackend);
+    setToolchainStrategy(defaults.toolchain.strategy);
     setSourceFile("src/main.cpp");
     setCxxStandardInput("20");
     setTargetTriplet("");
@@ -1065,6 +1080,7 @@ export default function App() {
     setDependencyBackend(
       getDependencyBackendValue(config.dependencyBackend, hostDefaults.dependencyBackend)
     );
+    setToolchainStrategy(config.toolchain?.strategy ?? hostDefaults.toolchain.strategy);
     setSourceFile(config.sourceFile);
     setCxxStandardInput(String(config.cxxStandard));
     setTargetTriplet(config.targetTriplet);
@@ -1132,6 +1148,9 @@ export default function App() {
             : current.cxxStandard,
         targetTriplet: targetTriplet.trim() || current.targetTriplet,
         dependencyBackend,
+        toolchain: {
+          strategy: toolchainStrategy
+        },
         compiler: {
           preferredFamily: toolPolicies.cxx.preferredFamily,
           ...(msvcInstallationPath
@@ -1141,19 +1160,38 @@ export default function App() {
         tools: {
           cmake: {
             mode: toolPolicies.cmake.mode,
-            version: toolPolicies.cmake.version?.trim() || current.tools?.cmake?.version || "default"
+            version:
+              toolPolicies.cmake.version?.trim() ||
+              current.tools?.cmake?.version ||
+              "default"
           },
           ninja: {
             mode: toolPolicies.ninja.mode,
-            version: toolPolicies.ninja.version?.trim() || current.tools?.ninja?.version || "default"
+            version:
+              toolPolicies.ninja.version?.trim() ||
+              current.tools?.ninja?.version ||
+              "default"
           },
           vcpkg: {
             mode: toolPolicies.vcpkg.mode,
-            version: toolPolicies.vcpkg.version?.trim() || current.tools?.vcpkg?.version || "default"
+            version:
+              toolPolicies.vcpkg.version?.trim() ||
+              current.tools?.vcpkg?.version ||
+              "default"
+          },
+          conan: {
+            mode: toolPolicies.conan.mode,
+            version:
+              toolPolicies.conan.version?.trim() ||
+              current.tools?.conan?.version ||
+              "default"
           },
           cxx: {
             mode: toolPolicies.cxx.mode,
-            version: toolPolicies.cxx.version?.trim() || current.tools?.cxx?.version || "latest",
+            version:
+              toolPolicies.cxx.version?.trim() ||
+              current.tools?.cxx?.version ||
+              "latest",
             preferredFamily: toolPolicies.cxx.preferredFamily,
             ...(msvcInstallationPath
               ? { msvcInstallationPath }
@@ -1313,6 +1351,8 @@ export default function App() {
       dependency,
       preset: buildPreset,
       dependencyBackend: payloadDependencyBackend,
+      toolchainStrategy:
+        action === "install-tools" || action === "init" ? toolchainStrategy : undefined,
       compilerPreference,
       msvcInstallationPath,
       toolPolicies: payloadToolPolicies
@@ -1573,7 +1613,7 @@ export default function App() {
                   <CardHeader className="pb-3">
                     <CardTitle>프로젝트 / 백엔드 설정</CardTitle>
                     <CardDescription>
-                      schema v3 기준의 핵심 프로젝트 설정을 읽고 저장합니다
+                      schema v4 기준의 핵심 프로젝트 설정을 읽고 저장합니다
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -1598,7 +1638,12 @@ export default function App() {
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">dependency_backend</Label>
-                        <Select value={dependencyBackend} onValueChange={(value) => setDependencyBackend(value as DependencyBackend)}>
+                        <Select
+                          value={dependencyBackend}
+                          onValueChange={(value) =>
+                            setDependencyBackend(value as DependencyBackend)
+                          }
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="백엔드 선택" />
                           </SelectTrigger>
@@ -1613,6 +1658,31 @@ export default function App() {
                         <p className="text-[11px] text-muted-foreground">
                           이 host 기본 backend는{" "}
                           <code className="font-mono">{hostDefaults.dependencyBackend}</code>
+                          입니다.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">toolchain.strategy</Label>
+                        <Select
+                          value={toolchainStrategy}
+                          onValueChange={(value) =>
+                            setToolchainStrategy(value as ToolchainStrategy)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="전략 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {toolchainStrategyOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-muted-foreground">
+                          이 host 기본 strategy는{" "}
+                          <code className="font-mono">{hostDefaults.toolchain.strategy}</code>
                           입니다.
                         </p>
                       </div>

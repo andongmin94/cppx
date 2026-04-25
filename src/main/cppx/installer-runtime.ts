@@ -154,10 +154,7 @@ export async function getResolvedToolSnapshot(
   toolPolicies?: ProjectToolPoliciesPayload,
   dependencyBackend: DependencyBackend = "none"
 ): Promise<ToolResolutionSnapshot> {
-  await deps.ensureCppxLayout();
-  const manifest = await deps.readToolManifest();
   const policies = deps.resolveRequestedPolicies(toolPolicies);
-
   const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
     await Promise.all([
       deps.resolveToolLifecycleCapabilities("cmake"),
@@ -166,17 +163,64 @@ export async function getResolvedToolSnapshot(
       deps.resolveToolLifecycleCapabilities("conan"),
       deps.resolveToolLifecycleCapabilities("cxx")
     ]);
+  const requiredCapabilities = [
+    cmakeCapabilities,
+    ninjaCapabilities,
+    dependencyBackend === "vcpkg" ? vcpkgCapabilities : undefined,
+    dependencyBackend === "conan" ? conanCapabilities : undefined,
+    cxxCapabilities
+  ].filter((capabilities): capabilities is ToolLifecycleCapabilities => Boolean(capabilities));
+
+  if (requiredCapabilities.some((capabilities) => !capabilities.detect)) {
+    return {
+      cmake: toResolutionDetail(null, {
+        mode: policies.cmake.mode,
+        requestedVersion: policies.cmake.version,
+        capabilities: cmakeCapabilities
+      }),
+      ninja: toResolutionDetail(null, {
+        mode: policies.ninja.mode,
+        requestedVersion: policies.ninja.version,
+        capabilities: ninjaCapabilities
+      }),
+      vcpkg: toResolutionDetail(null, {
+        mode: policies.vcpkg.mode,
+        requestedVersion: policies.vcpkg.version,
+        capabilities: vcpkgCapabilities
+      }),
+      conan: toResolutionDetail(null, {
+        mode: policies.conan.mode,
+        requestedVersion: policies.conan.version,
+        capabilities: conanCapabilities
+      }),
+      cxx: toResolutionDetail(null, {
+        mode: policies.cxx.mode,
+        requestedVersion: policies.cxx.version,
+        compilerFamily: policies.cxx.preferredFamily,
+        capabilities: cxxCapabilities
+      })
+    };
+  }
+
+  await deps.ensureCppxLayout();
+  const manifest = await deps.readToolManifest();
 
   const [cmake, ninja, vcpkg, conan, cxx] = await Promise.all([
-    deps.resolveToolExecutable("cmake", manifest, policies.cmake),
-    deps.resolveToolExecutable("ninja", manifest, policies.ninja),
-    dependencyBackend === "vcpkg"
+    cmakeCapabilities.detect
+      ? deps.resolveToolExecutable("cmake", manifest, policies.cmake)
+      : Promise.resolve(null),
+    ninjaCapabilities.detect
+      ? deps.resolveToolExecutable("ninja", manifest, policies.ninja)
+      : Promise.resolve(null),
+    dependencyBackend === "vcpkg" && vcpkgCapabilities.detect
       ? deps.resolveToolExecutable("vcpkg", manifest, policies.vcpkg)
       : Promise.resolve(null),
-    dependencyBackend === "conan"
+    dependencyBackend === "conan" && conanCapabilities.detect
       ? deps.resolveToolExecutable("conan", manifest, policies.conan)
       : Promise.resolve(null),
-    deps.resolveToolExecutable("cxx", manifest, policies.cxx)
+    cxxCapabilities.detect
+      ? deps.resolveToolExecutable("cxx", manifest, policies.cxx)
+      : Promise.resolve(null)
   ]);
 
   return {
@@ -212,9 +256,6 @@ export async function getResolvedToolSnapshot(
 export async function getToolStatus(
   deps: InstallerRuntimeDependencies
 ): Promise<ToolStatus> {
-  await deps.ensureCppxLayout();
-  const manifest = await deps.readToolManifest();
-
   const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
     await Promise.all([
       deps.resolveToolLifecycleCapabilities("cmake"),
@@ -224,12 +265,45 @@ export async function getToolStatus(
       deps.resolveToolLifecycleCapabilities("cxx")
     ]);
 
+  if (
+    [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities]
+      .some((capabilities) => !capabilities.detect)
+  ) {
+    return {
+      cmake: false,
+      ninja: false,
+      vcpkg: false,
+      conan: false,
+      cxx: false,
+      details: {
+        cmake: toStatusDetail(null, cmakeCapabilities),
+        ninja: toStatusDetail(null, ninjaCapabilities),
+        vcpkg: toStatusDetail(null, vcpkgCapabilities),
+        conan: toStatusDetail(null, conanCapabilities),
+        cxx: toStatusDetail(null, cxxCapabilities)
+      }
+    };
+  }
+
+  await deps.ensureCppxLayout();
+  const manifest = await deps.readToolManifest();
+
   const [cmake, ninja, vcpkg, conan, cxx] = await Promise.all([
-    deps.resolveToolExecutable("cmake", manifest),
-    deps.resolveToolExecutable("ninja", manifest),
-    deps.resolveToolExecutable("vcpkg", manifest),
-    deps.resolveToolExecutable("conan", manifest),
-    deps.resolveToolExecutable("cxx", manifest)
+    cmakeCapabilities.detect
+      ? deps.resolveToolExecutable("cmake", manifest)
+      : Promise.resolve(null),
+    ninjaCapabilities.detect
+      ? deps.resolveToolExecutable("ninja", manifest)
+      : Promise.resolve(null),
+    vcpkgCapabilities.detect
+      ? deps.resolveToolExecutable("vcpkg", manifest)
+      : Promise.resolve(null),
+    conanCapabilities.detect
+      ? deps.resolveToolExecutable("conan", manifest)
+      : Promise.resolve(null),
+    cxxCapabilities.detect
+      ? deps.resolveToolExecutable("cxx", manifest)
+      : Promise.resolve(null)
   ]);
 
   return {
@@ -254,9 +328,37 @@ export async function resolveToolchainOrThrow(
   toolPolicies?: ProjectToolPoliciesPayload,
   dependencyBackend: DependencyBackend = "none"
 ): Promise<Toolchain> {
+  const policies = deps.resolveRequestedPolicies(toolPolicies);
+  const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
+    await Promise.all([
+      deps.resolveToolLifecycleCapabilities("cmake"),
+      deps.resolveToolLifecycleCapabilities("ninja"),
+      deps.resolveToolLifecycleCapabilities("vcpkg"),
+      deps.resolveToolLifecycleCapabilities("conan"),
+      deps.resolveToolLifecycleCapabilities("cxx")
+    ]);
+  const unsupportedNotes = [
+    cmakeCapabilities,
+    ninjaCapabilities,
+    dependencyBackend === "vcpkg" ? vcpkgCapabilities : undefined,
+    dependencyBackend === "conan" ? conanCapabilities : undefined,
+    cxxCapabilities
+  ]
+    .filter((capabilities): capabilities is ToolLifecycleCapabilities =>
+      Boolean(capabilities && !capabilities.detect)
+    )
+    .map((capabilities) => capabilities.note)
+    .filter((note): note is string => typeof note === "string" && note.trim().length > 0);
+
+  if (unsupportedNotes.length > 0) {
+    throw new CppxError(
+      "현재 host는 cppx 도구 해석 대상이 아닙니다.",
+      Array.from(new Set(unsupportedNotes)).join(" ")
+    );
+  }
+
   await deps.ensureCppxLayout();
   const manifest = await deps.readToolManifest();
-  const policies = deps.resolveRequestedPolicies(toolPolicies);
 
   const [cmake, ninja, vcpkg, conan, cxxResolved] = await Promise.all([
     deps.resolveToolExecutable("cmake", manifest, policies.cmake),

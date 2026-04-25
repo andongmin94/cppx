@@ -12,6 +12,7 @@ test("service host defaults follow the active host adapter policy", async () => 
   assert.equal(defaults.platform, hostAdapter.platform);
   assert.equal(defaults.defaultPreset, getDefaultPresetName());
   assert.equal(defaults.dependencyBackend, hostAdapter.getDefaultDependencyBackend());
+  assert.equal(defaults.toolchain.strategy, "recommended");
   assert.equal(defaults.hostSupport.platform, hostAdapter.platform);
   assert.equal(defaults.toolCapabilities.cmake.detect, true);
   assert.equal(typeof defaults.toolCapabilities.cmake.supportsExactPin, "boolean");

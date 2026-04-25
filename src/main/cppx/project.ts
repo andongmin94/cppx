@@ -1,6 +1,6 @@
 ﻿import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ProjectConfigPayload } from "@shared/contracts";
+import type { ProjectConfigPayload, ToolchainStrategy } from "@shared/contracts";
 import { runSpawn } from "./command-runner";
 import {
   CPPX_CONFIG_PATH,
@@ -627,6 +627,7 @@ export async function initProject(
   logger: CppxLogger,
   options: {
     dependencyBackend?: "vcpkg" | "conan" | "none";
+    toolchainStrategy?: ToolchainStrategy;
   } = {}
 ): Promise<string> {
   const parentWorkspace = path.resolve(workspace);
@@ -656,7 +657,11 @@ export async function initProject(
   await ensureDir(path.join(targetWorkspace, ".vscode"));
   await ensureDir(path.join(targetWorkspace, ".cppx"));
 
-  const config = defaultProjectConfig(name, toolchain.compilerFamily);
+  const config = defaultProjectConfig(
+    name,
+    toolchain.compilerFamily,
+    options.toolchainStrategy
+  );
   if (options.dependencyBackend) {
     config.dependencyBackend = options.dependencyBackend;
   }

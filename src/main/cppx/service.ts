@@ -18,6 +18,11 @@ import { CppxLogger, type LogSink } from "./logger";
 import { getHostAdapter } from "./platform";
 import { defaultProjectConfig, getDefaultPresetName } from "./config";
 import {
+  createRequestedToolPolicies,
+  mergeToolPolicies,
+  normalizeToolchainStrategy
+} from "./toolchain-strategy";
+import {
   addDependency,
   buildWithPreset,
   cleanupLegacyWorkspaceFiles,
@@ -40,61 +45,13 @@ export class CppxService {
     this.logger = new CppxLogger(logSink);
   }
 
-  private mergeToolPolicies(
-    base: ProjectToolPoliciesPayload | undefined,
-    next: ProjectToolPoliciesPayload | undefined
-  ): ProjectToolPoliciesPayload | undefined {
-    if (!base && !next) {
-      return undefined;
-    }
-
-    return {
-      cmake: { ...base?.cmake, ...next?.cmake },
-      ninja: { ...base?.ninja, ...next?.ninja },
-      vcpkg: { ...base?.vcpkg, ...next?.vcpkg },
-      conan: { ...base?.conan, ...next?.conan },
-      cxx: { ...base?.cxx, ...next?.cxx }
-    };
-  }
-
   private getPayloadToolPolicies(payload: RunCommandPayload): ProjectToolPoliciesPayload | undefined {
-    const policies = this.mergeToolPolicies(undefined, payload.toolPolicies);
-
-    if (!payload.compilerPreference && !payload.msvcInstallationPath) {
-      return policies;
-    }
-
-    const cxxPolicy = { ...(policies?.cxx ?? {}) };
-    if (payload.compilerPreference === "msvc") {
-      cxxPolicy.mode = cxxPolicy.mode ?? "system";
-      cxxPolicy.preferredFamily = "msvc";
-      cxxPolicy.version = cxxPolicy.version ?? "default";
-    } else if (payload.compilerPreference === "mingw") {
-      cxxPolicy.mode = cxxPolicy.mode ?? "managed";
-      cxxPolicy.preferredFamily = "mingw";
-      cxxPolicy.version = cxxPolicy.version ?? "latest";
-    } else if (payload.compilerPreference === "clang") {
-      const defaultMode = hostAdapter.getDefaultToolMode("cxx", "clang");
-      cxxPolicy.mode = cxxPolicy.mode ?? defaultMode;
-      cxxPolicy.preferredFamily = "clang";
-      cxxPolicy.version =
-        cxxPolicy.version ?? (cxxPolicy.mode === "managed" ? "latest" : "default");
-    } else if (payload.compilerPreference === "gcc") {
-      const defaultMode = hostAdapter.getDefaultToolMode("cxx", "gcc");
-      cxxPolicy.mode = cxxPolicy.mode ?? defaultMode;
-      cxxPolicy.preferredFamily = "gcc";
-      cxxPolicy.version =
-        cxxPolicy.version ?? (cxxPolicy.mode === "managed" ? "latest" : "default");
-    }
-
-    if (payload.msvcInstallationPath?.trim()) {
-      cxxPolicy.msvcInstallationPath = payload.msvcInstallationPath.trim();
-    }
-
-    return {
-      ...(policies ?? {}),
-      cxx: cxxPolicy
-    };
+    return createRequestedToolPolicies({
+      toolPolicies: payload.toolPolicies,
+      compilerPreference: payload.compilerPreference,
+      msvcInstallationPath: payload.msvcInstallationPath,
+      strategy: payload.toolchainStrategy
+    });
   }
 
   private async resolveExecutionToolPolicies(
@@ -103,12 +60,21 @@ export class CppxService {
   ): Promise<ProjectToolPoliciesPayload | undefined> {
     const payloadPolicies = this.getPayloadToolPolicies(payload);
 
-    if (payload.action === "install-tools" || payload.action === "init") {
+    if (payload.action === "init") {
       return payloadPolicies;
     }
 
+    if (payload.action === "install-tools") {
+      try {
+        const projectConfig = await loadProjectConfig(workspace);
+        return mergeToolPolicies(projectConfig.tools, payloadPolicies);
+      } catch {
+        return payloadPolicies;
+      }
+    }
+
     const projectConfig = await loadProjectConfig(workspace);
-    return this.mergeToolPolicies(projectConfig.tools, payloadPolicies);
+    return mergeToolPolicies(projectConfig.tools, payloadPolicies);
   }
 
   private async resolveExecutionBackend(
@@ -186,6 +152,13 @@ export class CppxService {
       preset = await this.resolveExecutionPreset(workspace, payload);
       dependencyBackend = await this.resolveExecutionBackend(workspace, payload);
       toolPolicies = await this.resolveExecutionToolPolicies(workspace, payload);
+      const hostSupport = await resolveHostSupport();
+      if (hostSupport.tier === "unsupported") {
+        throw new CppxError(
+          "현재 Linux 배포판은 cppx 지원 대상이 아닙니다.",
+          hostSupport.notes.join(" ")
+        );
+      }
       this.logger.info(action, `'${action}' 시작`);
 
       switch (action) {
@@ -204,7 +177,10 @@ export class CppxService {
             payload.projectName,
             toolchain,
             this.logger,
-            { dependencyBackend }
+            {
+              dependencyBackend,
+              toolchainStrategy: normalizeToolchainStrategy(payload.toolchainStrategy)
+            }
           );
           resolvedWorkspace = initializedWorkspace;
           await cleanupLegacyWorkspaceFiles(initializedWorkspace, this.logger);
@@ -310,6 +286,7 @@ export class CppxService {
       platform: hostAdapter.platform,
       defaultPreset: config.defaultPreset,
       dependencyBackend: config.dependencyBackend,
+      toolchain: { ...config.toolchain },
       toolPolicies: {
         cmake: { ...config.tools.cmake },
         ninja: { ...config.tools.ninja },

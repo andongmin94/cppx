@@ -34,7 +34,8 @@ test("loadProjectConfig migrates the legacy project.json and vcpkg.json files", 
 
       assert.equal(config.name, "legacy-app");
       assert.equal(config.targetName, "legacy-app");
-      assert.equal(config.schemaVersion, 3);
+      assert.equal(config.schemaVersion, 4);
+      assert.equal(config.toolchain?.strategy, "recommended");
       assert.equal(config.defaultPreset, getDefaultPresetName());
       assert.equal(config.sourceFile, "src/main.cpp");
       assert.equal(config.targetTriplet, hostAdapter.getDefaultTargetTriplet("mingw"));

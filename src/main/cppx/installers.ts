@@ -52,8 +52,7 @@ import {
   getToolStatus as getToolStatusImpl,
   resolveToolchainOrThrow as resolveToolchainOrThrowImpl,
   type InstallerRuntimeDependencies,
-  type ResolvedToolExecutable,
-  type ResolvedToolPolicies
+  type ResolvedToolExecutable
 } from "./installer-runtime";
 import type { CppxLogger } from "./logger";
 import { getHostAdapter } from "./platform";
@@ -68,6 +67,7 @@ import {
   DEFAULT_TOOL_VERSION_TOKEN,
   resolveToolCatalogEntry
 } from "./tool-catalog";
+import { resolveRequestedPolicies } from "./toolchain-strategy";
 import type {
   CompilerFamily,
   CompilerToolPolicy,
@@ -118,23 +118,6 @@ const EXECUTABLE_CANDIDATES_BY_TOOL: Record<ToolName, string[]> = {
   ]
 };
 
-function normalizeToolMode(value: unknown, fallback: "managed" | "system"): "managed" | "system" {
-  return value === "system" || value === "managed" ? value : fallback;
-}
-
-function normalizeToolVersion(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
-}
-
-function normalizeCompilerFamily(
-  value: unknown,
-  fallback: CompilerFamily
-): CompilerFamily {
-  return value === "clang" || value === "gcc" || value === "msvc" || value === "mingw"
-    ? value
-    : fallback;
-}
-
 function getCompilerExecutableCandidates(
   preferredFamily: CompilerFamily | undefined
 ): string[] {
@@ -159,22 +142,6 @@ function getCompilerExecutableCandidates(
 
 function getHostArchLabel(): string {
   return process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : process.arch;
-}
-
-function getDefaultToolMode(tool: ToolName, compilerFamily: CompilerFamily): "managed" | "system" {
-  return hostAdapter.getDefaultToolMode(tool, compilerFamily);
-}
-
-function getDefaultToolVersion(
-  tool: ToolName,
-  mode: "managed" | "system",
-  compilerFamily: CompilerFamily
-): string {
-  if (tool === "cxx" && mode === "managed" && compilerFamily !== "msvc") {
-    return "latest";
-  }
-
-  return DEFAULT_TOOL_VERSION_TOKEN;
 }
 
 function ensureManagedLifecycleSupportedOrThrow(
@@ -231,64 +198,6 @@ function shouldUsePinnedManagedArchivePath(
   }
 
   return tool === "conan" && hostAdapter.platform === "darwin";
-}
-
-function resolveRequestedPolicies(
-  toolPolicies?: ProjectToolPoliciesPayload
-): ResolvedToolPolicies {
-  const compilerFamily = normalizeCompilerFamily(
-    toolPolicies?.cxx?.preferredFamily,
-    hostAdapter.compilerFamily
-  );
-  const defaultCmakeMode = getDefaultToolMode("cmake", compilerFamily);
-  const defaultNinjaMode = getDefaultToolMode("ninja", compilerFamily);
-  const defaultVcpkgMode = getDefaultToolMode("vcpkg", compilerFamily);
-  const defaultConanMode = getDefaultToolMode("conan", compilerFamily);
-  const defaultCxxMode = getDefaultToolMode("cxx", compilerFamily);
-
-  return {
-    cmake: {
-      mode: normalizeToolMode(toolPolicies?.cmake?.mode, defaultCmakeMode),
-      version: normalizeToolVersion(
-        toolPolicies?.cmake?.version,
-        getDefaultToolVersion("cmake", defaultCmakeMode, compilerFamily)
-      )
-    },
-    ninja: {
-      mode: normalizeToolMode(toolPolicies?.ninja?.mode, defaultNinjaMode),
-      version: normalizeToolVersion(
-        toolPolicies?.ninja?.version,
-        getDefaultToolVersion("ninja", defaultNinjaMode, compilerFamily)
-      )
-    },
-    vcpkg: {
-      mode: normalizeToolMode(toolPolicies?.vcpkg?.mode, defaultVcpkgMode),
-      version: normalizeToolVersion(
-        toolPolicies?.vcpkg?.version,
-        getDefaultToolVersion("vcpkg", defaultVcpkgMode, compilerFamily)
-      )
-    },
-    conan: {
-      mode: normalizeToolMode(toolPolicies?.conan?.mode, defaultConanMode),
-      version: normalizeToolVersion(
-        toolPolicies?.conan?.version,
-        getDefaultToolVersion("conan", defaultConanMode, compilerFamily)
-      )
-    },
-    cxx: {
-      mode: normalizeToolMode(toolPolicies?.cxx?.mode, defaultCxxMode),
-      version: normalizeToolVersion(
-        toolPolicies?.cxx?.version,
-        getDefaultToolVersion("cxx", defaultCxxMode, compilerFamily)
-      ),
-      preferredFamily: compilerFamily,
-      msvcInstallationPath:
-        typeof toolPolicies?.cxx?.msvcInstallationPath === "string" &&
-        toolPolicies.cxx.msvcInstallationPath.trim().length > 0
-          ? toolPolicies.cxx.msvcInstallationPath.trim()
-          : undefined
-    }
-  };
 }
 
 function sanitizeVersionToken(version: string): string {
@@ -828,8 +737,6 @@ export async function installAllTools(
   toolPolicies?: ProjectToolPoliciesPayload,
   dependencyBackend: DependencyBackend = hostAdapter.getDefaultDependencyBackend()
 ): Promise<Toolchain> {
-  await ensureCppxLayout();
-
   const policies = resolveRequestedPolicies(toolPolicies);
   const [cmakeCapabilities, ninjaCapabilities, vcpkgCapabilities, conanCapabilities, cxxCapabilities] =
     await Promise.all([
@@ -839,6 +746,27 @@ export async function installAllTools(
       resolveToolLifecycleCapabilities("conan"),
       resolveToolLifecycleCapabilities("cxx")
     ]);
+  const unsupportedNotes = [
+    cmakeCapabilities,
+    ninjaCapabilities,
+    dependencyBackend === "vcpkg" ? vcpkgCapabilities : undefined,
+    dependencyBackend === "conan" ? conanCapabilities : undefined,
+    cxxCapabilities
+  ]
+    .filter((capabilities): capabilities is ToolLifecycleCapabilities =>
+      Boolean(capabilities && !capabilities.detect)
+    )
+    .map((capabilities) => capabilities.note)
+    .filter((note): note is string => typeof note === "string" && note.trim().length > 0);
+
+  if (unsupportedNotes.length > 0) {
+    throw new CppxError(
+      "현재 host는 cppx 도구 설치 대상이 아닙니다.",
+      Array.from(new Set(unsupportedNotes)).join(" ")
+    );
+  }
+
+  await ensureCppxLayout();
   let cmake: ResolvedToolInfo | undefined;
   let ninja: ResolvedToolInfo | undefined;
   let vcpkg: ResolvedToolInfo | undefined;

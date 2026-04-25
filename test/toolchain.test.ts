@@ -221,7 +221,7 @@ test("getToolStatus and resolveToolchainOrThrow surface archive-managed conan on
   }
 });
 
-test("installAllTools fails clearly when managed lifecycle is not supported on unsupported Linux hosts", async () => {
+test("installAllTools rejects unsupported Linux hosts before tool install", async () => {
   if (process.platform !== "linux") {
     return;
   }
@@ -249,10 +249,10 @@ test("installAllTools fails clearly when managed lifecycle is not supported on u
               ),
             (error) => {
               assert.ok(error instanceof CppxError);
-              assert.match(error.message, /도구 설치가 완료되지 않았습니다/);
+              assert.match(error.message, /현재 host는 cppx 도구 설치 대상이 아닙니다/);
               assert.match(
                 error.details ?? "",
-                /Ubuntu LTS profiles \(22\.04, 24\.04\)|Managed Linux support is limited to Ubuntu LTS profiles \(22\.04, 24\.04\)|managed 수명주기/
+                /Ubuntu LTS profiles \(22\.04, 24\.04, 26\.04\)|Managed Linux support is limited to Ubuntu LTS profiles \(22\.04, 24\.04, 26\.04\)|outside the cppx host support policy/
               );
               return true;
             }

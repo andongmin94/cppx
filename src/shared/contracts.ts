@@ -9,6 +9,7 @@
 
 export type CompilerPreference = "clang" | "gcc" | "mingw" | "msvc";
 export type ToolInstallMode = "managed" | "system";
+export type ToolchainStrategy = "recommended" | "portable" | "provider" | "system";
 export type DependencyBackend = "vcpkg" | "conan" | "none";
 export type ToolId = "cmake" | "ninja" | "vcpkg" | "conan" | "cxx";
 export type HostPlatformPayload = "win32" | "darwin" | "linux";
@@ -22,7 +23,7 @@ export type ToolLifecycleProvider =
   | "msvc"
   | "unknown";
 export type ToolOwnership = "cppx" | "external" | "unknown";
-export type HostSupportTier = "official" | "best-effort";
+export type HostSupportTier = "official" | "best-effort" | "unsupported";
 export type ToolLifecycleVersionSource =
   | "cppx-verified"
   | "host-provider"
@@ -93,6 +94,10 @@ export interface CompilerConfigPayload {
   msvcInstallationPath?: string;
 }
 
+export interface ToolchainConfigPayload {
+  strategy?: ToolchainStrategy;
+}
+
 export interface PackageConfigPayload {
   version: string;
   vendor: string;
@@ -114,6 +119,7 @@ export interface ProjectConfigPayload {
   cmake: CmakeConfig;
   schemaVersion?: number;
   dependencyBackend?: DependencyBackend;
+  toolchain?: ToolchainConfigPayload;
   compiler?: CompilerConfigPayload;
   package?: PackageConfigPayload;
   tools?: ProjectToolPoliciesPayload;
@@ -124,6 +130,7 @@ export interface HostDefaultsPayload {
   platform: HostPlatformPayload;
   defaultPreset: string;
   dependencyBackend: DependencyBackend;
+  toolchain: Required<ToolchainConfigPayload>;
   toolPolicies: Required<ProjectToolPoliciesPayload>;
   hostSupport: HostSupportPayload;
   toolCapabilities: Record<ToolId, ToolLifecycleCapabilities>;
@@ -162,6 +169,7 @@ export interface RunCommandPayload {
   dependency?: string;
   preset?: string;
   dependencyBackend?: DependencyBackend;
+  toolchainStrategy?: ToolchainStrategy;
   compilerPreference?: CompilerPreference;
   msvcInstallationPath?: string;
   toolPolicies?: ProjectToolPoliciesPayload;

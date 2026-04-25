@@ -6,7 +6,8 @@ import type {
   ToolOwnership,
   PresetConfigPayload,
   ProjectConfigPayload,
-  ToolInstallMode
+  ToolInstallMode,
+  ToolchainStrategy
 } from "@shared/contracts";
 import type { HostPlatform } from "./platform";
 
@@ -36,6 +37,9 @@ export interface NormalizedProjectConfig extends ProjectConfigPayload {
   schemaVersion: number;
   targetName: string;
   dependencyBackend: DependencyBackend;
+  toolchain: {
+    strategy: ToolchainStrategy;
+  };
   compiler: {
     preferredFamily?: CompilerPreference;
     msvcInstallationPath?: string;

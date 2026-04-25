@@ -40,7 +40,10 @@ export function getToolOwnershipLabel(ownership: ToolOwnership): string {
 }
 
 export function formatLifecycleActions(capabilities: ToolLifecycleCapabilities): string {
-  const actions = ["detect"];
+  const actions = [];
+  if (capabilities.detect) {
+    actions.push("detect");
+  }
   if (capabilities.install) {
     actions.push("install");
   }
@@ -50,7 +53,7 @@ export function formatLifecycleActions(capabilities: ToolLifecycleCapabilities):
   if (capabilities.remove) {
     actions.push("remove");
   }
-  return actions.join("/");
+  return actions.length > 0 ? actions.join("/") : "none";
 }
 
 export function getVersionSourceLabel(versionSource: ToolLifecycleVersionSource): string {

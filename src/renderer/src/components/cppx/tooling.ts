@@ -87,6 +87,12 @@ export function getToolModeOptions(
   hostSupport: Pick<HostSupportPayload, "tier">,
   currentMode: ToolInstallMode | undefined
 ): Array<{ value: ToolInstallMode; label: string }> {
+  if (hostSupport.tier === "unsupported") {
+    return currentMode
+      ? [{ value: currentMode, label: `${currentMode} (unsupported)` }]
+      : [];
+  }
+
   const options =
     hostSupport.tier === "best-effort"
       ? DEFAULT_TOOL_MODE_OPTIONS.filter((option) => option.value === "system")
@@ -128,13 +134,13 @@ export function getCxxModeGuidance(
       }
       return "macOS에서는 C++를 managed(Homebrew LLVM) 또는 system(PATH의 Apple Clang/clang++)으로 선택할 수 있습니다.";
     case "linux":
-      if (hostSupport.tier === "best-effort") {
-        return "Other Linux는 best-effort host라 C++는 system(PATH의 clang++ / g++) 중심으로 동작합니다.";
+      if (hostSupport.tier === "unsupported") {
+        return "Other Linux는 cppx 지원 대상이 아닙니다. 공식 Linux host는 Ubuntu 22.04/24.04/26.04 LTS입니다.";
       }
       if (!hostSupport.managedLifecycleReady) {
         return "Ubuntu LTS 공식 host에서는 C++를 managed(apt Clang / GCC) 또는 system(PATH의 clang++ / g++)으로 선택할 수 있지만, managed install을 실행하려면 apt-get이 먼저 필요합니다.";
       }
-      return "Ubuntu LTS 공식 host에서는 C++를 managed(apt Clang / GCC) 또는 system(PATH의 clang++ / g++)으로 선택할 수 있습니다. Other Linux는 conservative system detection 중심입니다.";
+      return "Ubuntu LTS 공식 host에서는 C++를 managed(apt Clang / GCC) 또는 system(PATH의 clang++ / g++)으로 선택할 수 있습니다.";
     default:
       return null;
   }
@@ -143,6 +149,10 @@ export function getCxxModeGuidance(
 export function getToolchainInstallGuidance(
   hostSupport: Pick<HostSupportPayload, "tier" | "managedLifecycleReady">
 ): string {
+  if (hostSupport.tier === "unsupported") {
+    return "이 host는 cppx 지원 대상이 아닙니다. Windows, macOS 14+, Ubuntu LTS 중 하나에서 실행하세요.";
+  }
+
   if (hostSupport.tier === "best-effort") {
     return "이 host는 best-effort system 중심 경로입니다. managed install보다 system 도구 준비와 doctor 안내를 먼저 확인하세요.";
   }
@@ -176,6 +186,10 @@ export function getToolVersionGuidance(detail: ToolStatusDetail | undefined): st
   const capabilities = detail?.capabilities;
   if (!capabilities) {
     return null;
+  }
+
+  if (!capabilities.detect) {
+    return "이 host는 cppx 지원 대상이 아니므로 도구 감지를 수행하지 않습니다.";
   }
 
   if (

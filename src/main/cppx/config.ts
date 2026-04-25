@@ -9,11 +9,19 @@ import type {
   PresetConfigPayload,
   ProjectConfigPayload,
   ProjectToolPoliciesPayload,
-  ToolInstallMode
+  ToolInstallMode,
+  ToolchainConfigPayload,
+  ToolchainStrategy
 } from "@shared/contracts";
 import { CppxError } from "./errors";
 import { pathExists, readJsonFile, writeTextFile } from "./fs-utils";
 import { getHostAdapter } from "./platform";
+import {
+  DEFAULT_TOOLCHAIN_STRATEGY,
+  createDefaultToolPolicies,
+  normalizeCompilerPreferenceForHost,
+  normalizeToolchainStrategy
+} from "./toolchain-strategy";
 import type {
   CompilerFamily,
   CompilerToolPolicy,
@@ -24,39 +32,10 @@ import type {
 
 export const CPPX_CONFIG_PATH = path.join(".cppx", "config.toml");
 const LEGACY_PROJECT_CONFIG_PATH = path.join(".cppx", "project.json");
-const CONFIG_SCHEMA_VERSION = 3;
-const DEFAULT_MANAGED_VERSION = "default";
-const DEFAULT_COMPILER_VERSION = "latest";
+const CONFIG_SCHEMA_VERSION = 4;
 const hostAdapter = getHostAdapter();
 
 type PartialProjectConfig = Partial<ProjectConfigPayload>;
-
-function isCompilerPreference(value: unknown): value is CompilerPreference {
-  return value === "clang" || value === "gcc" || value === "mingw" || value === "msvc";
-}
-
-function normalizeCompilerPreferenceForHost(
-  value: unknown,
-  fallback: CompilerPreference
-): CompilerPreference {
-  if (value === "msvc") {
-    return "msvc";
-  }
-
-  if (value === "mingw") {
-    return hostAdapter.platform === "win32" ? "mingw" : hostAdapter.compilerFamily;
-  }
-
-  if (value === "gcc") {
-    return hostAdapter.platform === "linux" ? "gcc" : hostAdapter.compilerFamily;
-  }
-
-  if (value === "clang") {
-    return hostAdapter.platform === "win32" ? fallback : "clang";
-  }
-
-  return fallback;
-}
 
 function isDependencyBackend(value: unknown): value is DependencyBackend {
   return value === "vcpkg" || value === "conan" || value === "none";
@@ -215,32 +194,6 @@ function createDefaultPresets(targetTriplet: string): PresetConfigPayload[] {
   ];
 }
 
-function defaultToolPolicy(tool: Exclude<ToolName, "cxx">): ToolPolicy {
-  return {
-    mode: hostAdapter.getDefaultToolMode(tool),
-    version: DEFAULT_MANAGED_VERSION
-  };
-}
-
-function defaultCompilerPolicy(compilerFamily: CompilerFamily): CompilerToolPolicy {
-  const mode = hostAdapter.getDefaultToolMode("cxx", compilerFamily);
-
-  if (compilerFamily === "msvc") {
-    return {
-      mode,
-      version: DEFAULT_MANAGED_VERSION,
-      preferredFamily: "msvc"
-    };
-  }
-
-  return {
-    mode,
-    version: mode === "managed" ? DEFAULT_COMPILER_VERSION : DEFAULT_MANAGED_VERSION,
-    preferredFamily:
-      compilerFamily === "clang" ? "clang" : compilerFamily === "gcc" ? "gcc" : "mingw"
-  };
-}
-
 function normalizeToolPolicy(raw: unknown, fallback: ToolPolicy): ToolPolicy {
   const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
@@ -287,6 +240,16 @@ function normalizeCompilerConfig(
     msvcInstallationPath:
       normalizeOptionalString(record.msvcInstallationPath) ??
       fallback.msvcInstallationPath
+  };
+}
+
+function normalizeToolchainConfig(
+  raw: unknown,
+  fallback: { strategy: ToolchainStrategy }
+): { strategy: ToolchainStrategy } {
+  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return {
+    strategy: normalizeToolchainStrategy(record.strategy, fallback.strategy)
   };
 }
 
@@ -365,6 +328,20 @@ function mergeCompilerConfig(
   };
 }
 
+function mergeToolchainConfig(
+  current: ToolchainConfigPayload | undefined,
+  next: ToolchainConfigPayload | undefined
+): ToolchainConfigPayload | undefined {
+  if (!current && !next) {
+    return undefined;
+  }
+
+  return {
+    ...current,
+    ...next
+  };
+}
+
 function mergePackageConfig(
   current: PackageConfigPayload | undefined,
   next: PackageConfigPayload | undefined
@@ -391,10 +368,13 @@ function mergePackageConfig(
 
 export function defaultProjectConfig(
   projectName: string,
-  compilerFamily: CompilerFamily = hostAdapter.compilerFamily
+  compilerFamily: CompilerFamily = hostAdapter.compilerFamily,
+  strategy: ToolchainStrategy = DEFAULT_TOOLCHAIN_STRATEGY
 ): NormalizedProjectConfig {
+  const normalizedStrategy = normalizeToolchainStrategy(strategy);
   const targetTriplet = defaultTargetTripletForCompiler(compilerFamily);
   const targetName = createSafeTargetName(projectName);
+  const defaultTools = createDefaultToolPolicies(compilerFamily, normalizedStrategy);
   let compiler:
     | { preferredFamily: "msvc" }
     | { preferredFamily: "clang" }
@@ -419,16 +399,19 @@ export function defaultProjectConfig(
     cxxStandard: 20,
     targetTriplet,
     dependencyBackend: hostAdapter.getDefaultDependencyBackend(),
+    toolchain: {
+      strategy: normalizedStrategy
+    },
     dependencies: [],
     cmake: defaultCmakeConfig(),
     compiler,
     package: defaultPackageConfig(projectName),
     tools: {
-      cmake: defaultToolPolicy("cmake"),
-      ninja: defaultToolPolicy("ninja"),
-      vcpkg: defaultToolPolicy("vcpkg"),
-      conan: defaultToolPolicy("conan"),
-      cxx: defaultCompilerPolicy(compilerFamily)
+      cmake: { ...defaultTools.cmake },
+      ninja: { ...defaultTools.ninja },
+      vcpkg: { ...defaultTools.vcpkg },
+      conan: { ...defaultTools.conan },
+      cxx: { ...defaultTools.cxx }
     },
     presets: createDefaultPresets(targetTriplet)
   };
@@ -451,7 +434,26 @@ export function normalizeProjectConfig(
         options.base?.compiler.preferredFamily ?? hostAdapter.compilerFamily
       )
     );
-  const seed = options.base ?? defaultProjectConfig(fallbackName, inferredCompilerFamily);
+  const inferredStrategy = normalizeToolchainStrategy(
+    raw.toolchain?.strategy,
+    options.base?.toolchain.strategy ?? DEFAULT_TOOLCHAIN_STRATEGY
+  );
+  const baseSeed =
+    options.base ?? defaultProjectConfig(fallbackName, inferredCompilerFamily, inferredStrategy);
+  const strategyDefaults = createDefaultToolPolicies(inferredCompilerFamily, inferredStrategy);
+  const seed: NormalizedProjectConfig = {
+    ...baseSeed,
+    toolchain: {
+      strategy: inferredStrategy
+    },
+    tools: {
+      cmake: { ...strategyDefaults.cmake },
+      ninja: { ...strategyDefaults.ninja },
+      vcpkg: { ...strategyDefaults.vcpkg },
+      conan: { ...strategyDefaults.conan },
+      cxx: { ...strategyDefaults.cxx }
+    }
+  };
   const name = normalizeString(raw.name, seed.name) || fallbackName;
   const packageSeed =
     options.base && options.base.name === name
@@ -493,6 +495,7 @@ export function normalizeProjectConfig(
     cxxStandard: normalizePositiveInteger(raw.cxxStandard, seed.cxxStandard),
     targetTriplet,
     dependencyBackend,
+    toolchain: normalizeToolchainConfig(raw.toolchain, seed.toolchain),
     dependencies:
       raw.dependencies !== undefined
         ? normalizeStringArray(raw.dependencies)
@@ -538,6 +541,7 @@ export function mergeProjectConfigPayload(
       ...current,
       ...payload,
       compiler: mergeCompilerConfig(current.compiler, payload.compiler),
+      toolchain: mergeToolchainConfig(current.toolchain, payload.toolchain),
       package: mergePackageConfig(current.package, payload.package),
       tools: mergeToolPolicies(current.tools, payload.tools),
       cmake: {
@@ -662,6 +666,7 @@ export function parseConfigToml(
     cmake: defaultCmakeConfig(),
     dependencies: [],
     compiler: {},
+    toolchain: {},
     package: undefined,
     tools: {},
     presets: []
@@ -765,6 +770,16 @@ export function parseConfigToml(
         raw.compiler = {
           ...(raw.compiler ?? {}),
           msvcInstallationPath: parseTomlString(value)
+        };
+      }
+      continue;
+    }
+
+    if (section === "toolchain") {
+      if (key === "strategy") {
+        raw.toolchain = {
+          ...(raw.toolchain ?? {}),
+          strategy: parseTomlString(value) as ToolchainStrategy
         };
       }
       continue;
@@ -893,6 +908,9 @@ export function configToToml(config: NormalizedProjectConfig): string {
       ? [`readme_file = "${escapeTomlString(config.package.readmeFile)}"`]
       : []),
     ...(config.package.icon ? [`icon = "${escapeTomlString(config.package.icon)}"`] : []),
+    "",
+    "[toolchain]",
+    `strategy = "${escapeTomlString(config.toolchain.strategy)}"`,
     "",
     "[compiler]"
   ];

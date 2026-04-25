@@ -60,6 +60,7 @@ interface WorkspaceConfigSummary {
   schemaVersion?: number;
   dependencyBackend: DependencyBackend;
   compilerFamily: CompilerPreference;
+  toolchainStrategy?: string;
   toolPolicies?: ProjectToolPoliciesPayload;
   targetName?: string;
   legacyConfig: boolean;
@@ -127,6 +128,7 @@ async function readWorkspaceConfigSummary(workspace: string): Promise<WorkspaceC
         parsed.tools.cxx.preferredFamily ??
         parsed.compiler.preferredFamily ??
         hostAdapter.compilerFamily,
+      toolchainStrategy: parsed.toolchain.strategy,
       toolPolicies: parsed.tools,
       targetName: parsed.targetName,
       legacyConfig
@@ -201,10 +203,21 @@ export async function runDoctor(
   checks.push({
     key: "host-support",
     label: "host",
-    severity: hostSupport.managedLifecycleReady ? "ok" : "warning",
+    severity:
+      hostSupport.tier === "unsupported"
+        ? "blocking"
+        : hostSupport.managedLifecycleReady
+          ? "ok"
+          : "warning",
     summary: formatHostSupportSummary(hostSupport),
     details: hostSupport.notes.join(" ")
   });
+  if (hostSupport.tier === "unsupported") {
+    addNextStep(
+      nextSteps,
+      "cppx는 Windows x64, macOS 14+ x64/arm64, Ubuntu 22.04/24.04/26.04 LTS x64/arm64에서 실행하세요."
+    );
+  }
 
   if (!configSummary.exists) {
     checks.push({
@@ -227,15 +240,15 @@ export async function runDoctor(
     });
   } else {
     const schemaState =
-      (configSummary.schemaVersion ?? 0) < 3
-        ? `schema v${configSummary.schemaVersion}을 읽었습니다. 다시 저장하면 v3로 올라갑니다.`
+      (configSummary.schemaVersion ?? 0) < 4
+        ? `schema v${configSummary.schemaVersion}을 읽었습니다. 다시 저장하면 v4로 올라갑니다.`
         : `schema v${configSummary.schemaVersion} 설정을 읽었습니다.`;
 
     checks.push({
       key: "config",
       label: "config",
-      severity: (configSummary.schemaVersion ?? 0) < 3 ? "warning" : "ok",
-      summary: `${schemaState} backend=${configSummary.dependencyBackend}, target=${configSummary.targetName ?? "unknown"}`
+      severity: (configSummary.schemaVersion ?? 0) < 4 ? "warning" : "ok",
+      summary: `${schemaState} backend=${configSummary.dependencyBackend}, strategy=${configSummary.toolchainStrategy ?? "recommended"}, target=${configSummary.targetName ?? "unknown"}`
     });
   }
 
@@ -464,7 +477,7 @@ export async function runDoctor(
       addNextStep(nextSteps, `${REPO_CPPX_COMMAND} install-tools`);
     }
 
-    if (missingToolModes.includes("system")) {
+    if (hostSupport.tier !== "unsupported" && missingToolModes.includes("system")) {
       addNextStep(nextSteps, getSystemInstallHint());
     }
 

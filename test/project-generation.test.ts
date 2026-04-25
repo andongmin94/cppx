@@ -35,9 +35,11 @@ test("initProject generates the current baseline files for the active host", asy
   try {
     await initProject(workspace, "sample-app", createToolchain(), logger);
     const configToml = await readText(path.join(workspace, ".cppx", "config.toml"));
-    assert.match(configToml, /schema_version = 3/);
+    assert.match(configToml, /schema_version = 4/);
     assert.match(configToml, /target_name = "sample-app"/);
     assert.match(configToml, /\[package\]/);
+    assert.match(configToml, /\[toolchain\]/);
+    assert.match(configToml, /strategy = "recommended"/);
     assert.match(configToml, /dependency_backend = "none"/);
 
     if (process.platform === "win32") {

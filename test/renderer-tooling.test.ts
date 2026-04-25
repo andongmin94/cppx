@@ -55,15 +55,15 @@ test("renderer tooling exposes host-specific cxx mode guidance", () => {
       tier: "official",
       managedLifecycleReady: true
     }),
-    "Ubuntu LTS 공식 host에서는 C++를 managed(apt Clang / GCC) 또는 system(PATH의 clang++ / g++)으로 선택할 수 있습니다. Other Linux는 conservative system detection 중심입니다."
+    "Ubuntu LTS 공식 host에서는 C++를 managed(apt Clang / GCC) 또는 system(PATH의 clang++ / g++)으로 선택할 수 있습니다."
   );
   assert.equal(
     getCxxModeGuidance({
       platform: "linux",
-      tier: "best-effort",
+      tier: "unsupported",
       managedLifecycleReady: false
     }),
-    "Other Linux는 best-effort host라 C++는 system(PATH의 clang++ / g++) 중심으로 동작합니다."
+    "Other Linux는 cppx 지원 대상이 아닙니다. 공식 Linux host는 Ubuntu 22.04/24.04/26.04 LTS입니다."
   );
   assert.equal(
     getCxxModeGuidance({
@@ -113,6 +113,25 @@ test("renderer tooling exposes version guidance from lifecycle metadata", () => 
     }),
     "이 host에서는 managed 버전 선택보다 system 감지가 우선입니다."
   );
+
+  assert.equal(
+    getToolVersionGuidance({
+      ready: false,
+      capabilities: {
+        provider: "unknown",
+        detect: false,
+        install: false,
+        repair: false,
+        remove: false,
+        supportsExactPin: false,
+        supportsFloatingVersion: false,
+        supportsInstanceSelection: false,
+        versionSource: "unknown",
+        systemDetectionKind: "none"
+      }
+    }),
+    "이 host는 cppx 지원 대상이 아니므로 도구 감지를 수행하지 않습니다."
+  );
 });
 
 test("renderer tooling narrows mode options on best-effort hosts and keeps legacy values visible", () => {
@@ -134,6 +153,14 @@ test("renderer tooling narrows mode options on best-effort hosts and keeps legac
       { value: "managed", label: "managed (legacy)" }
     ]
   );
+  assert.deepEqual(
+    getToolModeOptions({ tier: "unsupported" }, "system"),
+    [{ value: "system", label: "system (unsupported)" }]
+  );
+  assert.deepEqual(
+    getToolModeOptions({ tier: "unsupported" }, "managed"),
+    [{ value: "managed", label: "managed (unsupported)" }]
+  );
 });
 
 test("renderer tooling keeps backend fallback and target-triplet examples host-appropriate", () => {
@@ -144,7 +171,7 @@ test("renderer tooling keeps backend fallback and target-triplet examples host-a
   assert.equal(getTargetTripletPlaceholder("linux"), "arm64-linux / x64-linux");
 });
 
-test("renderer tooling explains install guidance for official and best-effort hosts", () => {
+test("renderer tooling explains install guidance for official, best-effort, and unsupported hosts", () => {
   assert.equal(
     getToolchainInstallGuidance({
       tier: "official",
@@ -165,6 +192,13 @@ test("renderer tooling explains install guidance for official and best-effort ho
       managedLifecycleReady: false
     }),
     "이 host는 best-effort system 중심 경로입니다. managed install보다 system 도구 준비와 doctor 안내를 먼저 확인하세요."
+  );
+  assert.equal(
+    getToolchainInstallGuidance({
+      tier: "unsupported",
+      managedLifecycleReady: false
+    }),
+    "이 host는 cppx 지원 대상이 아닙니다. Windows, macOS 14+, Ubuntu LTS 중 하나에서 실행하세요."
   );
 });
 

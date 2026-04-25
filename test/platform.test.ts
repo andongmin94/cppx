@@ -85,10 +85,11 @@ test("linux host adapter provides native defaults and commands", async () => {
   }
 });
 
-test("linux host adapter enables Ubuntu LTS managed defaults for Ubuntu 22.04 and 24.04", async () => {
+test("linux host adapter enables Ubuntu LTS managed defaults for Ubuntu 22.04, 24.04, and 26.04", async () => {
   for (const osRelease of [
     'ID=ubuntu\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04 LTS"\n',
-    'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n'
+    'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04 LTS"\n',
+    'ID=ubuntu\nVERSION_ID="26.04"\nPRETTY_NAME="Ubuntu 26.04 LTS"\n'
   ]) {
     await withEnv("CPPX_LINUX_OS_RELEASE", osRelease, async () => {
       const adapter = createHostAdapter("linux");
@@ -102,7 +103,7 @@ test("linux host adapter enables Ubuntu LTS managed defaults for Ubuntu 22.04 an
   }
 });
 
-test("linux host adapter keeps unsupported Linux in conservative system mode", async () => {
+test("linux host adapter keeps safe system defaults before host support rejects unsupported Linux", async () => {
   await withEnv(
     "CPPX_LINUX_OS_RELEASE",
     'ID=fedora\nVERSION_ID="41"\nPRETTY_NAME="Fedora Linux 41"\n',

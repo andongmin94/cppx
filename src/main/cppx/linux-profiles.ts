@@ -45,10 +45,19 @@ export const OFFICIAL_LINUX_PROFILES: LinuxHostProfile[] = [
     supportedArchitectures: ["x64", "arm64"],
     recommendedProvider: "apt",
     toolProviders: UBUNTU_LTS_TOOL_PROVIDERS
+  },
+  {
+    key: "ubuntu-26.04",
+    distroId: "ubuntu",
+    versionPrefix: "26.04",
+    label: "Ubuntu 26.04 LTS",
+    supportedArchitectures: ["x64", "arm64"],
+    recommendedProvider: "apt",
+    toolProviders: UBUNTU_LTS_TOOL_PROVIDERS
   }
 ];
 
-export const OFFICIAL_LINUX_PROFILE_DOC_LABEL = "Ubuntu LTS profiles (22.04, 24.04)";
+export const OFFICIAL_LINUX_PROFILE_DOC_LABEL = "Ubuntu LTS profiles (22.04, 24.04, 26.04)";
 
 function stripQuotes(value: string): string {
   return value.replace(/^"(.*)"$/, "$1").trim();
@@ -152,8 +161,8 @@ export function getLinuxManagedSupportLimitNote(): string {
   return `Managed Linux support is limited to ${OFFICIAL_LINUX_PROFILE_DOC_LABEL}.`;
 }
 
-export function getUnsupportedLinuxSystemModeNote(): string {
-  return "Unsupported Linux distributions stay in conservative system mode.";
+export function getUnsupportedLinuxHostNote(): string {
+  return "Unsupported Linux distributions are outside the cppx host support policy.";
 }
 
 export function getLinuxManagedHostNotes(profile: LinuxHostProfile): string[] {

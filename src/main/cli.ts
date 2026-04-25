@@ -4,10 +4,12 @@ import path from "node:path";
 import { Command, Option } from "commander";
 import type {
   DependencyBackend,
+  HostSupportPayload,
   LogEntry,
   RunCommandPayload,
   RunCommandResult,
-  ToolStatusDetail
+  ToolStatusDetail,
+  ToolchainStrategy
 } from "@shared/contracts";
 import { formatCompilerPreference } from "@shared/compiler-display";
 import {
@@ -44,6 +46,7 @@ interface WorkspaceConfigSummary {
   dependencyBackend?: DependencyBackend;
   schemaVersion?: number;
   targetName?: string;
+  toolchainStrategy?: ToolchainStrategy;
   compilerFamily?: "clang" | "gcc" | "mingw" | "msvc";
 }
 
@@ -73,6 +76,7 @@ async function readWorkspaceConfigSummary(workspaceRaw: string): Promise<Workspa
     dependencyBackend: parsed.dependencyBackend,
     schemaVersion: parsed.schemaVersion,
     targetName: parsed.targetName,
+    toolchainStrategy: parsed.toolchain.strategy,
     compilerFamily:
       parsed.tools.cxx.preferredFamily ??
       parsed.compiler.preferredFamily ??
@@ -89,6 +93,9 @@ function printInitGuidance(workspaceRaw: string, config: WorkspaceConfigSummary)
     console.log(
       `config: schema v${config.schemaVersion ?? "unknown"}, backend=${config.dependencyBackend ?? hostAdapter.getDefaultDependencyBackend()}, target=${config.targetName ?? "unknown"}`
     );
+    if (config.toolchainStrategy) {
+      console.log(`toolchain: strategy=${config.toolchainStrategy}`);
+    }
   }
   console.log(`next: ${REPO_CPPX_COMMAND} doctor ${displayPath}`);
   console.log(`next: ${REPO_CPPX_COMMAND} build ${displayPath}`);
@@ -111,7 +118,8 @@ function printInitGuidance(workspaceRaw: string, config: WorkspaceConfigSummary)
 function printStatusGuidance(
   workspaceRaw: string,
   rows: Array<[string, boolean, ToolStatusDetail | undefined]>,
-  config: WorkspaceConfigSummary
+  config: WorkspaceConfigSummary,
+  hostSupport?: HostSupportPayload
 ): void {
   const workspace = path.resolve(workspaceRaw);
   const missing = rows.filter(([, ready]) => !ready).map(([name]) => name);
@@ -122,6 +130,9 @@ function printStatusGuidance(
     console.log(
       `config: schema v${config.schemaVersion ?? "unknown"}, backend=${config.dependencyBackend ?? hostAdapter.getDefaultDependencyBackend()}, target=${config.targetName ?? "unknown"}`
     );
+    if (config.toolchainStrategy) {
+      console.log(`toolchain: strategy=${config.toolchainStrategy}`);
+    }
     if (config.dependencyBackend === "none") {
       console.log(
         `hint: dependency_backend = "none"이라 cppx add는 비활성화됩니다. 의존성이 필요하면 conan 또는 vcpkg로 바꾸세요.`
@@ -137,6 +148,11 @@ function printStatusGuidance(
     }
   } else {
     console.log("hint: 이 작업 폴더에는 .cppx/config.toml이 없습니다. 새 프로젝트라면 cppx init부터 시작하세요.");
+  }
+
+  if (hostSupport?.tier === "unsupported") {
+    console.log("hint: 이 Linux 배포판은 cppx 지원 대상이 아닙니다. Windows, macOS 14+, Ubuntu 22.04/24.04/26.04 LTS에서 실행하세요.");
+    return;
   }
 
   if (missing.length > 0) {
@@ -197,12 +213,23 @@ program
     "--compiler <compiler>",
     "Compiler preference (win32: mingw|msvc, darwin: clang, linux: clang|gcc)"
   )
+  .addOption(
+    new Option(
+      "--strategy <strategy>",
+      "Toolchain strategy (recommended, portable, provider, system)"
+    ).choices(["recommended", "portable", "provider", "system"])
+  )
   .option("--msvc-installation-path <path>", "Preferred MSVC installation path")
   .action(
-    async (options: { compiler?: "clang" | "gcc" | "mingw" | "msvc"; msvcInstallationPath?: string }) => {
+    async (options: {
+      compiler?: "clang" | "gcc" | "mingw" | "msvc";
+      strategy?: ToolchainStrategy;
+      msvcInstallationPath?: string;
+    }) => {
       await execute({
         action: "install-tools",
         workspace: process.cwd(),
+        toolchainStrategy: options.strategy,
         compilerPreference: options.compiler,
         msvcInstallationPath: options.msvcInstallationPath
       });
@@ -219,18 +246,25 @@ program
       "none"
     ])
   )
+  .addOption(
+    new Option(
+      "--strategy <strategy>",
+      "Toolchain strategy (recommended, portable, provider, system)"
+    ).choices(["recommended", "portable", "provider", "system"])
+  )
   .option("-n, --name <name>", "Project name")
   .action(
     async (
       workspace: string | undefined,
-      options: { name?: string; backend?: DependencyBackend }
+      options: { name?: string; backend?: DependencyBackend; strategy?: ToolchainStrategy }
     ) => {
       const resolvedWorkspace = workspace ?? process.cwd();
       const result = await execute({
-      action: "init",
+        action: "init",
         workspace: resolvedWorkspace,
         projectName: options.name,
-        dependencyBackend: options.backend
+        dependencyBackend: options.backend,
+        toolchainStrategy: options.strategy
       });
       if (!result.ok || !result.workspace) {
         return;
@@ -331,7 +365,8 @@ program
 
     try {
       const config = await readWorkspaceConfigSummary(resolvedWorkspace);
-      printStatusGuidance(resolvedWorkspace, rows, config);
+      const hostDefaults = await service.getHostDefaults();
+      printStatusGuidance(resolvedWorkspace, rows, config, hostDefaults.hostSupport);
     } catch (error) {
       console.log("");
       console.log(
