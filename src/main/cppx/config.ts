@@ -1029,6 +1029,7 @@ export async function readProjectConfig(
 
   throw new CppxError(
     "cppx 설정을 찾을 수 없습니다.",
-    `${CPPX_CONFIG_PATH} 경로를 기대했습니다. 먼저 cppx init을 실행하세요.`
+    `${CPPX_CONFIG_PATH} 경로를 기대했습니다. 먼저 cppx init을 실행하세요.`,
+    "PROJECT_CONFIG_MISSING"
   );
 }

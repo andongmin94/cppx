@@ -23,6 +23,7 @@ const EMPTY_BUILD_TYPE = "__none__";
 
 interface PresetMatrixCardProps {
   busy: boolean;
+  configLoaded: boolean;
   presetConfigs: PresetConfigPayload[];
   selectedPreset: string;
   targetTriplet: string;
@@ -38,6 +39,7 @@ interface PresetMatrixCardProps {
 
 export function PresetMatrixCard({
   busy,
+  configLoaded,
   presetConfigs,
   selectedPreset,
   targetTriplet,
@@ -56,17 +58,28 @@ export function PresetMatrixCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-2 sm:grid-cols-2">
-          <Button variant="secondary" onClick={onAddPreset} disabled={busy} className="gap-2">
+          <Button
+            variant="secondary"
+            onClick={onAddPreset}
+            disabled={busy || !configLoaded}
+            className="gap-2"
+          >
             <Plus className="h-4 w-4" />
             프리셋 추가
           </Button>
-          <Button variant="secondary" onClick={onReloadPresets} disabled={busy}>
+          <Button
+            variant="secondary"
+            onClick={onReloadPresets}
+            disabled={busy || !configLoaded}
+          >
             프리셋 다시 불러오기
           </Button>
         </div>
         {presetConfigs.length === 0 ? (
           <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-            현재 로드된 프리셋이 없습니다. config를 저장하면 기본 프리셋이 다시 생성됩니다.
+            {configLoaded
+              ? "현재 로드된 프리셋이 없습니다. 필요한 프리셋을 추가한 뒤 .cppx 설정을 저장하세요."
+              : "초기화 후 프리셋을 편집할 수 있습니다."}
           </p>
         ) : (
           <div className="space-y-3">
@@ -89,7 +102,7 @@ export function PresetMatrixCard({
                     size="sm"
                     variant="outline"
                     onClick={() => onRemovePreset(index)}
-                    disabled={busy}
+                    disabled={busy || !configLoaded}
                     className="gap-2"
                   >
                     <Trash2 className="h-4 w-4" />

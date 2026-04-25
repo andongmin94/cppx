@@ -126,6 +126,17 @@ export interface ProjectConfigPayload {
   presets?: PresetConfigPayload[];
 }
 
+export type ProjectConfigLoadResult =
+  | {
+      status: "loaded";
+      config: ProjectConfigPayload;
+    }
+  | {
+      status: "missing";
+      message: string;
+      details?: string;
+    };
+
 export interface HostDefaultsPayload {
   platform: HostPlatformPayload;
   defaultPreset: string;
@@ -228,7 +239,7 @@ export interface CppxApi {
   getHostDefaults: () => Promise<HostDefaultsPayload>;
   getCompilerScan: () => Promise<CompilerScanResult>;
   getToolStatus: () => Promise<ToolStatus>;
-  getProjectConfig: (workspace: string) => Promise<ProjectConfigPayload>;
+  getProjectConfig: (workspace: string) => Promise<ProjectConfigLoadResult>;
   saveProjectConfig: (
     workspace: string,
     config: ProjectConfigPayload

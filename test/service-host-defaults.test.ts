@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CppxService } from "../src/main/cppx/service";
 import { getHostAdapter } from "../src/main/cppx/platform";
 import { getDefaultPresetName } from "../src/main/cppx/config";
+import { createTempDir, removeDir } from "./support/helpers";
 
 test("service host defaults follow the active host adapter policy", async () => {
   const service = new CppxService(() => {});
@@ -69,5 +70,20 @@ test("service host defaults follow the active host adapter policy", async () => 
     );
   } else {
     assert.equal(defaults.toolCapabilities.conan.detect, true);
+  }
+});
+
+test("service project config lookup returns missing state for an uninitialized workspace", async () => {
+  const service = new CppxService(() => {});
+  const workspace = await createTempDir("service-missing-config");
+
+  try {
+    const result = await service.getProjectConfig(workspace);
+
+    assert.equal(result.status, "missing");
+    assert.match(result.message, /cppx 설정을 찾을 수 없습니다/);
+    assert.match(result.details ?? "", /\.cppx[\\/]config\.toml/);
+  } finally {
+    await removeDir(workspace);
   }
 });

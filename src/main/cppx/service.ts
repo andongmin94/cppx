@@ -2,13 +2,14 @@
 import type {
   DependencyBackend,
   HostDefaultsPayload,
+  ProjectConfigLoadResult,
   ProjectConfigPayload,
   ProjectToolPoliciesPayload,
   RunCommandPayload,
   RunCommandResult,
   ToolStatus
 } from "@shared/contracts";
-import { CppxError } from "./errors";
+import { CppxError, isCppxErrorWithCode } from "./errors";
 import {
   resolveHostSupport,
   resolveToolLifecycleCapabilities
@@ -305,12 +306,27 @@ export class CppxService {
     };
   }
 
-  async getProjectConfig(workspaceRaw: string): Promise<ProjectConfigPayload> {
+  async getProjectConfig(workspaceRaw: string): Promise<ProjectConfigLoadResult> {
     const workspace =
       workspaceRaw && workspaceRaw.trim().length > 0
         ? path.resolve(workspaceRaw)
         : process.cwd();
-    return loadProjectConfig(workspace);
+    try {
+      return {
+        status: "loaded",
+        config: await loadProjectConfig(workspace)
+      };
+    } catch (error) {
+      if (isCppxErrorWithCode(error, "PROJECT_CONFIG_MISSING")) {
+        return {
+          status: "missing",
+          message: error.message,
+          details: error.details
+        };
+      }
+
+      throw error;
+    }
   }
 
   async saveProjectConfig(

@@ -15,10 +15,11 @@ import {
   SelectTrigger,
   SelectValue
 } from "@renderer/components/ui/select";
-import { Hammer, Play } from "lucide-react";
+import { FolderOpen, Hammer, Play } from "lucide-react";
 
 interface BuildActionPanelProps {
   busy: boolean;
+  configLoaded: boolean;
   buildPreset: string;
   presetConfigs: PresetConfigPayload[];
   selectedPresetConfig?: PresetConfigPayload;
@@ -28,10 +29,12 @@ interface BuildActionPanelProps {
   onBuild: () => void;
   onTest: () => void;
   onPack: () => void;
+  onOpenProject: () => void;
 }
 
 export function BuildActionPanel({
   busy,
+  configLoaded,
   buildPreset,
   presetConfigs,
   selectedPresetConfig,
@@ -40,7 +43,8 @@ export function BuildActionPanel({
   onRun,
   onBuild,
   onTest,
-  onPack
+  onPack,
+  onOpenProject
 }: BuildActionPanelProps) {
   return (
     <Card>
@@ -68,7 +72,9 @@ export function BuildActionPanel({
             </Select>
           ) : (
             <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-              먼저 config를 불러오거나 저장해서 프리셋 목록을 동기화하세요.
+              {configLoaded
+                ? "프리셋이 없습니다. 프로젝트 설정에서 프리셋을 추가하세요."
+                : "프로젝트를 초기화하거나 기존 .cppx 설정을 불러오면 프리셋을 선택할 수 있습니다."}
             </p>
           )}
           {selectedPresetConfig && (
@@ -85,24 +91,52 @@ export function BuildActionPanel({
             </p>
           )}
         </div>
+        {!configLoaded && (
+          <Button
+            variant="secondary"
+            onClick={onOpenProject}
+            disabled={busy}
+            className="w-full gap-2"
+          >
+            <FolderOpen className="h-4 w-4" />
+            프로젝트 탭에서 열기
+          </Button>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="secondary"
             onClick={onRun}
-            disabled={busy || presetConfigs.length === 0 || selectedPresetConfig?.runnable === false}
+            disabled={
+              busy ||
+              !configLoaded ||
+              presetConfigs.length === 0 ||
+              selectedPresetConfig?.runnable === false
+            }
             className="gap-2"
           >
             <Play className="h-4 w-4" />
             Run
           </Button>
-          <Button onClick={onBuild} disabled={busy || presetConfigs.length === 0} className="gap-2">
+          <Button
+            onClick={onBuild}
+            disabled={busy || !configLoaded || presetConfigs.length === 0}
+            className="gap-2"
+          >
             <Hammer className="h-4 w-4" />
             Build
           </Button>
-          <Button variant="outline" onClick={onTest} disabled={busy || presetConfigs.length === 0}>
+          <Button
+            variant="outline"
+            onClick={onTest}
+            disabled={busy || !configLoaded || presetConfigs.length === 0}
+          >
             Test
           </Button>
-          <Button variant="outline" onClick={onPack} disabled={busy || presetConfigs.length === 0}>
+          <Button
+            variant="outline"
+            onClick={onPack}
+            disabled={busy || !configLoaded || presetConfigs.length === 0}
+          >
             Pack
           </Button>
         </div>

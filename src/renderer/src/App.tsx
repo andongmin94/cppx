@@ -63,8 +63,10 @@ import {
 } from "@renderer/components/ui/select";
 import { Separator } from "@renderer/components/ui/separator";
 import {
+  CheckCircle2,
   FolderOpen,
   Hammer,
+  PackagePlus,
   Terminal,
   Wrench,
   type LucideIcon
@@ -82,6 +84,7 @@ type ViewId = "workspace" | "build" | "logs";
 type InitButtonStatus = "idle" | "running" | "success" | "error";
 type InstallButtonStatus = "idle" | "running" | "success" | "error";
 type StatusToastTone = "info" | "success" | "error";
+type ProjectConfigStatus = "checking" | "loaded" | "missing" | "pending" | "error";
 type CompilerChoiceDecision =
   | { kind: "msvc"; installationPath: string }
   | { kind: "mingw" }
@@ -111,22 +114,22 @@ const viewItems: {
   label: string;
   icon: LucideIcon;
 }[] = [
-  { id: "workspace", label: "탐색", icon: FolderOpen },
-  { id: "build", label: "빌드", icon: Hammer },
+  { id: "workspace", label: "프로젝트", icon: FolderOpen },
+  { id: "build", label: "빌드/실행", icon: Hammer },
   { id: "logs", label: "로그", icon: Terminal }
 ];
 
 const dependencyBackendOptions: { value: DependencyBackend; label: string }[] = [
-  { value: "vcpkg", label: "vcpkg" },
-  { value: "conan", label: "conan" },
-  { value: "none", label: "none" }
+  { value: "vcpkg", label: "vcpkg - 패키지 매니페스트" },
+  { value: "conan", label: "conan - requires 기반" },
+  { value: "none", label: "none - 의존성 관리 안 함" }
 ];
 
 const toolchainStrategyOptions: { value: ToolchainStrategy; label: string }[] = [
-  { value: "recommended", label: "recommended" },
-  { value: "portable", label: "portable" },
-  { value: "provider", label: "provider" },
-  { value: "system", label: "system" }
+  { value: "recommended", label: "recommended - 호스트별 추천" },
+  { value: "portable", label: "portable - cppx 관리 도구 우선" },
+  { value: "provider", label: "provider - apt/Homebrew 등 사용" },
+  { value: "system", label: "system - 이미 설치된 도구 사용" }
 ];
 
 const INSTALL_TOOL_DONE_PATTERNS: Record<InstallToolKey, string[]> = {
@@ -714,6 +717,36 @@ function getStatusToastClassName(tone: StatusToastTone): string {
   }
 }
 
+function getProjectConfigStatusLabel(status: ProjectConfigStatus): string {
+  switch (status) {
+    case "loaded":
+      return "설정 로드됨";
+    case "missing":
+      return "초기화 전";
+    case "pending":
+      return "열기 필요";
+    case "error":
+      return "설정 확인 필요";
+    default:
+      return "확인 중";
+  }
+}
+
+function getProjectConfigStatusClassName(status: ProjectConfigStatus): string {
+  switch (status) {
+    case "loaded":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "missing":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "pending":
+      return "border-sky-200 bg-sky-50 text-sky-800";
+    case "error":
+      return "border-red-200 bg-red-50 text-red-800";
+    default:
+      return "border-border bg-secondary/70 text-muted-foreground";
+  }
+}
+
 export default function App() {
   const cppx = (window as unknown as { cppx?: CppxApi }).cppx;
   const [hostDefaults, setHostDefaults] = useState<HostDefaultsPayload>(() =>
@@ -745,6 +778,8 @@ export default function App() {
   const [toolStatus, setToolStatus] = useState<ToolStatus>(initialToolStatus);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   const [configNotice, setConfigNotice] = useState<string | null>(null);
+  const [projectConfigStatus, setProjectConfigStatus] =
+    useState<ProjectConfigStatus>("checking");
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [installProgress, setInstallProgress] = useState<InstallProgressState>(
     createInitialInstallProgress()
@@ -814,6 +849,33 @@ export default function App() {
     () => presetConfigs.find((item) => item.name === buildPreset),
     [buildPreset, presetConfigs]
   );
+  const isProjectConfigLoaded = projectConfigStatus === "loaded";
+  const projectConfigStatusLabel = getProjectConfigStatusLabel(projectConfigStatus);
+  const toolsReadyForSelectedBackend = readyToolCount >= requiredToolIds.length;
+  const setupPrimaryAction: CppxAction = toolsReadyForSelectedBackend
+    ? "init"
+    : "install-tools";
+  const setupInstallButtonText =
+    installButtonStatus === "idle"
+      ? "필수 도구 설치"
+      : getInstallButtonText(installButtonStatus, installProgress.stage);
+  const setupPrimaryButtonDisabled =
+    busy ||
+    projectConfigStatus === "checking" ||
+    (isProjectConfigLoaded && toolsReadyForSelectedBackend);
+  const setupPrimaryButtonText =
+    isProjectConfigLoaded && toolsReadyForSelectedBackend
+      ? "프로젝트 로드됨"
+      : projectConfigStatus === "pending"
+      ? "프로젝트 열기"
+      : toolsReadyForSelectedBackend
+        ? getInitButtonText(initButtonStatus)
+        : setupInstallButtonText;
+  const projectSummaryLabel = isProjectConfigLoaded
+    ? projectName || "미지정"
+    : projectConfigStatus === "pending"
+      ? "미확인"
+      : "미지정";
 
   function clearInitButtonResetTimer(): void {
     if (initButtonResetTimerRef.current) {
@@ -912,26 +974,26 @@ export default function App() {
       .catch(() => setDefaultRootPath(""));
 
     void (async () => {
-      let resolvedHostDefaults: HostDefaultsPayload;
       try {
-        resolvedHostDefaults = await cppx.getHostDefaults();
+        const resolvedHostDefaults = await cppx.getHostDefaults();
+        setHostDefaults({
+          ...resolvedHostDefaults,
+          toolPolicies: cloneToolPolicies(resolvedHostDefaults.toolPolicies)
+        });
+        resetProjectEditor(resolvedHostDefaults);
+
+        const defaultWorkspace = await cppx.getDefaultWorkspace();
+        setWorkspace(defaultWorkspace);
+        await refreshProjectConfig(cppx, defaultWorkspace, resolvedHostDefaults);
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
-            : "main process host capability contract를 불러오지 못했습니다.";
+            : "앱 초기 설정을 불러오지 못했습니다.";
         setBridgeError(message);
-        return;
+        setProjectConfigStatus("error");
+        setConfigNotice(message);
       }
-      setHostDefaults({
-        ...resolvedHostDefaults,
-        toolPolicies: cloneToolPolicies(resolvedHostDefaults.toolPolicies)
-      });
-      resetProjectEditor(resolvedHostDefaults);
-
-      const defaultWorkspace = await cppx.getDefaultWorkspace();
-      setWorkspace(defaultWorkspace);
-      await refreshProjectConfig(cppx, defaultWorkspace, resolvedHostDefaults);
     })();
     void refreshToolStatus(cppx);
 
@@ -1049,6 +1111,15 @@ export default function App() {
     setCmakeLinksInput("");
   }
 
+  function applyMissingProjectConfig(
+    defaults: HostDefaultsPayload = hostDefaults,
+    notice = "아직 cppx 프로젝트가 아닙니다. 설정을 고른 뒤 cppx init으로 초기화하세요."
+  ): void {
+    resetProjectEditor(defaults);
+    setProjectConfigStatus("missing");
+    setConfigNotice(notice);
+  }
+
   async function refreshProjectConfig(
     api: CppxApi,
     workspacePath: string,
@@ -1057,18 +1128,62 @@ export default function App() {
     const path = workspacePath.trim();
     if (!path) {
       resetProjectEditor(defaults);
+      setProjectConfigStatus("missing");
       return;
     }
 
+    setProjectConfigStatus("checking");
     try {
-      const config = await api.getProjectConfig(path);
-      applyProjectConfig(config);
-    } catch {
+      const result = await api.getProjectConfig(path);
+      if (result.status === "missing") {
+        applyMissingProjectConfig(defaults);
+        return;
+      }
+
+      applyProjectConfig(result.config, defaults);
+      setProjectConfigStatus("loaded");
+      setConfigNotice(null);
+    } catch (error) {
       resetProjectEditor(defaults);
+      setProjectConfigStatus("error");
+      setConfigNotice(
+        error instanceof Error ? error.message : "프로젝트 설정을 확인하지 못했습니다."
+      );
     }
   }
 
-  function applyProjectConfig(config: ProjectConfigPayload): void {
+  function handleWorkspaceInputChange(value: string): void {
+    setWorkspace(value);
+    setProjectConfigStatus(value.trim() ? "pending" : "missing");
+    setConfigNotice(
+      value.trim()
+        ? "작업 폴더 경로가 바뀌었습니다. 프로젝트 열기를 눌러 설정을 확인하세요."
+        : "작업 폴더 경로를 입력하세요."
+    );
+  }
+
+  async function openWorkspacePath(): Promise<void> {
+    if (!cppx) {
+      return;
+    }
+
+    if (busy) {
+      return;
+    }
+
+    if (!workspace.trim()) {
+      setProjectConfigStatus("missing");
+      setConfigNotice("작업 폴더 경로를 먼저 입력하세요.");
+      return;
+    }
+
+    await refreshProjectConfig(cppx, workspace);
+  }
+
+  function applyProjectConfig(
+    config: ProjectConfigPayload,
+    defaults: HostDefaultsPayload = hostDefaults
+  ): void {
     setProjectName(config.name);
     setPreset(config.defaultPreset);
     setBuildPreset((current) =>
@@ -1078,13 +1193,13 @@ export default function App() {
     );
     setProjectDependencies(config.dependencies);
     setDependencyBackend(
-      getDependencyBackendValue(config.dependencyBackend, hostDefaults.dependencyBackend)
+      getDependencyBackendValue(config.dependencyBackend, defaults.dependencyBackend)
     );
-    setToolchainStrategy(config.toolchain?.strategy ?? hostDefaults.toolchain.strategy);
+    setToolchainStrategy(config.toolchain?.strategy ?? defaults.toolchain.strategy);
     setSourceFile(config.sourceFile);
     setCxxStandardInput(String(config.cxxStandard));
     setTargetTriplet(config.targetTriplet);
-    setToolPolicies(toToolPolicyState(config, hostDefaults));
+    setToolPolicies(toToolPolicyState(config, defaults));
     setPresetConfigs(config.presets ?? []);
     setCmakeDefinitionsInput(toListInput(config.cmake.compileDefinitions));
     setCmakeOptionsInput(toListInput(config.cmake.compileOptions));
@@ -1099,15 +1214,24 @@ export default function App() {
 
     if (!workspace.trim()) {
       setConfigNotice("작업 폴더 경로를 먼저 입력하세요.");
+      setProjectConfigStatus("missing");
       return;
     }
 
     setConfigNotice(null);
+    setProjectConfigStatus("checking");
     try {
-      const config = await cppx.getProjectConfig(workspace);
-      applyProjectConfig(config);
+      const result = await cppx.getProjectConfig(workspace);
+      if (result.status === "missing") {
+        applyMissingProjectConfig(hostDefaults);
+        return;
+      }
+
+      applyProjectConfig(result.config);
+      setProjectConfigStatus("loaded");
       setConfigNotice(".cppx/config.toml을 불러왔습니다.");
     } catch (error) {
+      setProjectConfigStatus("error");
       setConfigNotice(error instanceof Error ? error.message : "config.toml 불러오기에 실패했습니다.");
     }
   }
@@ -1130,7 +1254,16 @@ export default function App() {
     setConfigNotice(null);
 
     try {
-      const current = await cppx.getProjectConfig(workspace);
+      const currentResult = await cppx.getProjectConfig(workspace);
+      if (currentResult.status === "missing") {
+        applyMissingProjectConfig(
+          hostDefaults,
+          "아직 저장할 .cppx/config.toml이 없습니다. 먼저 cppx init으로 프로젝트를 초기화하세요."
+        );
+        return;
+      }
+
+      const current = currentResult.config;
       const parsedCxxStandard = Number.parseInt(cxxStandardInput.trim(), 10);
       const msvcInstallationPath = getMsvcInstallationPathOverride(
         hostDefaults.platform,
@@ -1217,8 +1350,10 @@ export default function App() {
 
       const saved = await cppx.saveProjectConfig(workspace, updated);
       applyProjectConfig(saved);
+      setProjectConfigStatus("loaded");
       setConfigNotice(".cppx/config.toml에 저장했습니다.");
     } catch (error) {
+      setProjectConfigStatus("error");
       setConfigNotice(error instanceof Error ? error.message : "config.toml 저장에 실패했습니다.");
     } finally {
       setBusy(false);
@@ -1500,15 +1635,31 @@ export default function App() {
           </div>
         </div>
         <Separator className="my-4" />
-        <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground md:grid-cols-5">
           <p
             className="truncate rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2"
             title={workspace || "작업 폴더 미지정"}
           >
             작업 폴더: {workspace || "미지정"}
           </p>
+          <p
+            className="truncate rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2"
+            title={projectSummaryLabel}
+          >
+            프로젝트: {projectSummaryLabel}
+          </p>
+          <p
+            className={`rounded-[10px] border px-3 py-2 font-medium ${getProjectConfigStatusClassName(
+              projectConfigStatus
+            )}`}
+          >
+            설정 상태: {projectConfigStatusLabel}
+          </p>
           <p className="rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2">
-            기본 프리셋: <span className="font-mono">{preset}</span>
+            기본 프리셋:{" "}
+            <span className="font-mono">
+              {isProjectConfigLoaded ? preset : `${preset} (기본값)`}
+            </span>
           </p>
           <p className="rounded-[10px] border border-border/70 bg-secondary/60 px-3 py-2">
             의존성 백엔드: <span className="font-mono">{dependencyBackend}</span>
@@ -1548,6 +1699,69 @@ export default function App() {
         <div className="min-w-0 space-y-4">
           {activeView === "workspace" && (
             <section className="min-w-0 space-y-3">
+              {projectConfigStatus !== "loaded" && (
+                <div
+                  className={`rounded-[10px] border px-4 py-3 ${getProjectConfigStatusClassName(
+                    projectConfigStatus
+                  )}`}
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">
+                        {projectConfigStatus === "checking"
+                          ? "프로젝트 설정을 확인하는 중입니다."
+                          : projectConfigStatus === "error"
+                            ? "프로젝트 설정을 읽지 못했습니다."
+                            : projectConfigStatus === "pending"
+                              ? "작업 폴더를 열어야 합니다."
+                              : toolsReadyForSelectedBackend
+                                ? "아직 cppx 프로젝트가 아닙니다."
+                                : "필수 도구가 아직 준비되지 않았습니다."}
+                      </p>
+                      <p className="text-xs">
+                        {projectConfigStatus === "pending"
+                          ? "기존 cppx 프로젝트라면 설정이 로드되고, 새 폴더라면 초기화 전 상태로 바뀝니다."
+                          : toolsReadyForSelectedBackend
+                            ? "작업 폴더를 선택하고 필요한 옵션을 고른 뒤 cppx init으로 .cppx/config.toml을 생성하세요."
+                            : "먼저 CMake, Ninja, C++ 컴파일러 같은 필수 도구를 설치하거나 PATH에 등록하세요."}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row lg:shrink-0">
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          void (projectConfigStatus === "pending"
+                            ? openWorkspacePath()
+                            : runAction(setupPrimaryAction))
+                        }
+                        disabled={setupPrimaryButtonDisabled}
+                        className="gap-2"
+                      >
+                        {projectConfigStatus === "pending" ? (
+                          <FolderOpen className="h-4 w-4" />
+                        ) : isProjectConfigLoaded && toolsReadyForSelectedBackend ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : toolsReadyForSelectedBackend ? (
+                          <Wrench className={`h-4 w-4 ${initButtonStatus === "running" ? "animate-spin" : ""}`} />
+                        ) : (
+                          <PackagePlus className={`h-4 w-4 ${installButtonStatus === "running" ? "animate-spin" : ""}`} />
+                        )}
+                        {setupPrimaryButtonText}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void browseWorkspace()}
+                        disabled={busy}
+                        className="gap-2"
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        폴더 선택
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="grid min-w-0 gap-3 xl:grid-cols-2">
                 <Card>
                   <CardHeader>
@@ -1562,10 +1776,24 @@ export default function App() {
                       <Input
                         id="workspace"
                         value={workspace}
-                        onChange={(event) => setWorkspace(event.target.value)}
+                        onChange={(event) => handleWorkspaceInputChange(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void openWorkspacePath();
+                          }
+                        }}
                         placeholder="C:\\dev\\my-cpp-project"
                         className="sm:min-w-0 sm:flex-1"
                       />
+                      <Button
+                        onClick={() => void openWorkspacePath()}
+                        disabled={busy || !workspace.trim()}
+                        className="gap-2 sm:shrink-0"
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        열기
+                      </Button>
                       <Button
                         variant="secondary"
                         onClick={() => void browseWorkspace()}
@@ -1581,9 +1809,13 @@ export default function App() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle>프로젝트 생성/초기화</CardTitle>
+                    <CardTitle>
+                      {isProjectConfigLoaded ? "프로젝트 상태" : "프로젝트 생성/초기화"}
+                    </CardTitle>
                     <CardDescription>
-                      CMakePresets, backend manifest, VSCode tasks/launch 템플릿 생성
+                      {isProjectConfigLoaded
+                        ? "현재 작업 폴더는 cppx 프로젝트로 로드되어 있습니다"
+                        : "CMakePresets, backend manifest, VSCode tasks/launch 템플릿 생성"}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1597,12 +1829,28 @@ export default function App() {
                       />
                     </div>
                     <Button
-                      onClick={() => void runAction("init")}
-                      disabled={busy}
-                      className={getInitButtonClassName(initButtonStatus)}
+                      onClick={() =>
+                        void (projectConfigStatus === "pending"
+                          ? openWorkspacePath()
+                          : runAction(setupPrimaryAction))
+                      }
+                      disabled={setupPrimaryButtonDisabled}
+                      className={
+                        projectConfigStatus === "pending" || toolsReadyForSelectedBackend
+                          ? getInitButtonClassName(initButtonStatus)
+                          : getInstallButtonClassName(installButtonStatus)
+                      }
                     >
-                      <Wrench className={`h-4 w-4 ${initButtonStatus === "running" ? "animate-spin" : ""}`} />
-                      {getInitButtonText(initButtonStatus)}
+                      {projectConfigStatus === "pending" ? (
+                        <FolderOpen className="h-4 w-4" />
+                      ) : isProjectConfigLoaded && toolsReadyForSelectedBackend ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : toolsReadyForSelectedBackend ? (
+                        <Wrench className={`h-4 w-4 ${initButtonStatus === "running" ? "animate-spin" : ""}`} />
+                      ) : (
+                        <PackagePlus className={`h-4 w-4 ${installButtonStatus === "running" ? "animate-spin" : ""}`} />
+                      )}
+                      {setupPrimaryButtonText}
                     </Button>
                   </CardContent>
                 </Card>
@@ -1611,33 +1859,35 @@ export default function App() {
               <div className="grid min-w-0 gap-3 xl:grid-cols-2">
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle>프로젝트 / 백엔드 설정</CardTitle>
+                    <CardTitle>프로젝트 설정</CardTitle>
                     <CardDescription>
-                      schema v4 기준의 핵심 프로젝트 설정을 읽고 저장합니다
+                      초기화 후 .cppx/config.toml에 저장되는 핵심 옵션
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="space-y-1.5">
-                        <Label className="text-xs" htmlFor="source-file">source_file</Label>
+                        <Label className="text-xs" htmlFor="source-file">소스 파일</Label>
                         <Input
                           id="source-file"
                           value={sourceFile}
                           onChange={(event) => setSourceFile(event.target.value)}
                           placeholder="src/main.cpp"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs" htmlFor="cxx-standard">cxx_standard</Label>
+                        <Label className="text-xs" htmlFor="cxx-standard">C++ 표준</Label>
                         <Input
                           id="cxx-standard"
                           value={cxxStandardInput}
                           onChange={(event) => setCxxStandardInput(event.target.value)}
                           placeholder="20"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">dependency_backend</Label>
+                        <Label className="text-xs">의존성 방식</Label>
                         <Select
                           value={dependencyBackend}
                           onValueChange={(value) =>
@@ -1662,7 +1912,7 @@ export default function App() {
                         </p>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">toolchain.strategy</Label>
+                        <Label className="text-xs">도구 관리 방식</Label>
                         <Select
                           value={toolchainStrategy}
                           onValueChange={(value) =>
@@ -1687,7 +1937,7 @@ export default function App() {
                         </p>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">default_preset</Label>
+                        <Label className="text-xs">기본 프리셋</Label>
                         {presetConfigs.length > 0 ? (
                           <Select value={preset} onValueChange={setPreset}>
                             <SelectTrigger>
@@ -1703,18 +1953,19 @@ export default function App() {
                           </Select>
                         ) : (
                           <p className="rounded-[10px] border border-border/70 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-                            아직 프리셋이 없습니다. 저장 시 기본 프리셋이 다시 생성됩니다.
+                            초기화하면 호스트 기본 프리셋이 생성됩니다.
                           </p>
                         )}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor="target-triplet">target_triplet (기본값)</Label>
+                      <Label className="text-xs" htmlFor="target-triplet">대상 triplet</Label>
                       <Input
                         id="target-triplet"
                         value={targetTriplet}
                         onChange={(event) => setTargetTriplet(event.target.value)}
                         placeholder={getTargetTripletPlaceholder(hostDefaults.platform)}
+                        disabled={!isProjectConfigLoaded}
                       />
                     </div>
                   </CardContent>
@@ -1749,6 +2000,7 @@ export default function App() {
                           value={cmakeDefinitionsInput}
                           onChange={(event) => setCmakeDefinitionsInput(event.target.value)}
                           placeholder="USE_SSL, APP_VERSION=1"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                       <div className="space-y-1.5">
@@ -1758,6 +2010,7 @@ export default function App() {
                           value={cmakeOptionsInput}
                           onChange={(event) => setCmakeOptionsInput(event.target.value)}
                           placeholder="-Wall, -Wextra"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                       <div className="space-y-1.5">
@@ -1767,6 +2020,7 @@ export default function App() {
                           value={cmakeIncludesInput}
                           onChange={(event) => setCmakeIncludesInput(event.target.value)}
                           placeholder="include, third_party/fmt/include"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                       <div className="space-y-1.5">
@@ -1776,22 +2030,28 @@ export default function App() {
                           value={cmakeLinksInput}
                           onChange={(event) => setCmakeLinksInput(event.target.value)}
                           placeholder="ws2_32, bcrypt"
+                          disabled={!isProjectConfigLoaded}
                         />
                       </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Button
                         onClick={() => void saveProjectConfigToWorkspace()}
-                        disabled={busy}
+                        disabled={busy || !isProjectConfigLoaded}
+                        title={
+                          isProjectConfigLoaded
+                            ? ".cppx/config.toml에 저장"
+                            : "먼저 cppx init으로 프로젝트를 초기화하세요."
+                        }
                       >
-                        config 저장
+                        .cppx 설정 저장
                       </Button>
                       <Button
                         variant="secondary"
                         onClick={() => void loadProjectConfig()}
                         disabled={busy}
                       >
-                        config 불러오기
+                        설정 다시 읽기
                       </Button>
                     </div>
                     {configNotice && (
@@ -1820,7 +2080,7 @@ export default function App() {
                         />
                         <Button
                           onClick={() => void runAction("add")}
-                          disabled={busy || dependencyBackend === "none"}
+                          disabled={busy || dependencyBackend === "none" || !isProjectConfigLoaded}
                           className="sm:min-w-24 sm:shrink-0"
                         >
                           Add
@@ -1834,7 +2094,7 @@ export default function App() {
                           size="sm"
                           variant="ghost"
                           onClick={() => cppx && void refreshProjectConfig(cppx, workspace)}
-                          disabled={busy || !cppx || !workspace.trim()}
+                          disabled={busy || !cppx || !workspace.trim() || !isProjectConfigLoaded}
                         >
                           목록 새로고침
                         </Button>
@@ -1863,6 +2123,7 @@ export default function App() {
 
               <PresetMatrixCard
                 busy={busy}
+                configLoaded={isProjectConfigLoaded}
                 presetConfigs={presetConfigs}
                 selectedPreset={preset}
                 targetTriplet={targetTriplet}
@@ -1878,6 +2139,7 @@ export default function App() {
             <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <BuildActionPanel
                 busy={busy}
+                configLoaded={isProjectConfigLoaded}
                 buildPreset={buildPreset}
                 presetConfigs={presetConfigs}
                 selectedPresetConfig={selectedPresetConfig}
@@ -1887,6 +2149,7 @@ export default function App() {
                 onBuild={() => void runAction("build")}
                 onTest={() => void runAction("test")}
                 onPack={() => void runAction("pack")}
+                onOpenProject={() => setActiveView("workspace")}
               />
 
               <ToolchainStatusCard

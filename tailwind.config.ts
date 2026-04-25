@@ -36,8 +36,17 @@ export default {
         sm: "calc(var(--radius) - 4px)"
       },
       fontFamily: {
-        sans: ["'Noto Sans KR'", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "monospace"]
+        sans: [
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "'Segoe UI'",
+          "'Apple SD Gothic Neo'",
+          "'Malgun Gothic'",
+          "sans-serif"
+        ],
+        mono: ["ui-monospace", "SFMono-Regular", "Consolas", "monospace"]
       }
     }
   },
